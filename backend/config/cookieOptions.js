@@ -41,7 +41,8 @@ export const getCookieMode = () =>
 const baseCookieOptions = () => {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  if (!isProduction) {
+  if(!isProduction)
+  {
     return { httpOnly: true, path: '/', secure: false, sameSite: 'lax' };
   }
 
