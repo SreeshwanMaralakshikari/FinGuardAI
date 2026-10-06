@@ -1,0 +1,15 @@
+# dependencies
+node_modules
+
+# build output
+dist
+coverage
+
+# local environment (never commit real values; .env.example is the template)
+.env
+.env.local
+.env.*.local
+
+# logs
+*.log
+npm-debug.log*

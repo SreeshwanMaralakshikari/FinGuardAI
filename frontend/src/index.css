@@ -1,0 +1,23 @@
+/**
+ * src/index.css — Tailwind CSS v4 entry (CSS-first configuration).
+ * Tailwind v4 does NOT read tailwind.config.js unless it is referenced with
+ * @config, so the design tokens live here in @theme. Every `primary-*` utility
+ * used in src/utils/common.js is generated from these variables. Everything else
+ * (red-* for danger/error states, the default system font stack) is plain
+ * Tailwind — N-23: the never-used `danger-*` colours and the never-loaded
+ * "Inter" font declaration were removed.
+ */
+@import "tailwindcss";
+
+@theme {
+  --color-primary-50:  #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+}
