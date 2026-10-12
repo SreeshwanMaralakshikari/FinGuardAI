@@ -1,12 +1,13 @@
 /**
  * @file src/store/slices/analyticsSlice.js
  * @description Redux slice for admin analytics dashboard state.
- *   State: { fraudByHour[], fraudByDevice[], fraudByLocation[], riskDistribution[],
+ *   State: { fraudByHour[], fraudByPaymentMethod[], fraudByDevice[], scoreHistogram[], fraudByLocation[], riskDistribution[],
  *            lossPrevented, lossStats{}, loading, lossLoading, error, lossError, *RequestId }
  *   N-02 / N-03: each request has its own loading flag and error string (cleared on pending);
  *   only the latest request of a thunk may write its result.
- *   Note: fraudByDevice[] maps to 'fraudByPaymentMethod' from GET /admin-api/analytics
- *         (closest semantic match — FraudByDeviceChart renders device/payment breakdown)
+ *   A-01: fraudByPaymentMethod[] = [{paymentMethod,count}] (was wrongly named fraudByDevice);
+ *         fraudByDevice[] = [{deviceId,count,userCount}] is the REAL top-device list;
+ *         scoreHistogram[] = [{from,to,label,count}] (10 buckets of the fraud score).
  *         lossPrevented stores the INR scalar from GET /admin-api/analytics (C-P6-11)
  *
  *   Response unwrapping (D-P6-23, C-P6-28..C-P6-29):
@@ -24,7 +25,9 @@ import { getErrorMessage, rejectedMessage } from '../../api/errors.js'; // AUD-3
 
 const initialState = {
   fraudByHour:       [],
-  fraudByDevice:     [],  // maps to fraudByPaymentMethod from API
+  fraudByPaymentMethod: [], // [{ paymentMethod, count }]
+  fraudByDevice:     [],  // A-01: [{ deviceId, count, userCount }]
+  scoreHistogram:    [],  // A-01: [{ from, to, label, count }]
   fraudByLocation:   [],
   riskDistribution:  [],
   lossPrevented:     0,   // INR scalar from GET /admin-api/analytics (C-P6-11, D-P6-22)
@@ -34,6 +37,7 @@ const initialState = {
   openCases:         0,
   openAlerts:        0,
   lossStats:         {},  // { dailyTrend[], peakFraudHours[] } from GET /admin-api/analytics/trends
+  range:             {},  // A-01: startDate/endDate of the last explicit fetch
   loading:           false,
   lossLoading:       false, // FE-fix: trends request had to share `loading` with analytics
   error:             '',    // N-02: message of the last failed analytics fetch
@@ -46,14 +50,20 @@ const initialState = {
 
 /**
  * Fetch main analytics summary.
+ * @param {{ startDate?: string, endDate?: string }} [params] IST day bounds (see utils/dates.js dateRangeParams);
+ *   omitted = reuse the last range (state.range) so a live refresh never drops the dashboard's date filter
  * Phase 4 response: { success, data: { totalTransactions, fraudRate, riskDistribution,
  *   fraudByHour, fraudByPaymentMethod, fraudByLocation, lossPrevented, openCases, openAlerts } }
  */
 export const fetchAnalyticsThunk = createAsyncThunk(
   'analytics/fetchAnalytics',
-  async (_, { rejectWithValue }) => {
+  async (params, { getState, rejectWithValue }) => {
+    // no argument (socket refresh, demo-data refresh) = keep the range the dashboard is showing
+    const range = params ?? getState().analytics?.range ?? {};
     try {
-      const { data } = await api.get(API_PATHS.ADMIN.ANALYTICS);
+      const { data } = await (Object.keys(range).length > 0
+        ? api.get(API_PATHS.ADMIN.ANALYTICS, { params: range })
+        : api.get(API_PATHS.ADMIN.ANALYTICS));
       return data.data; // C-P6-28: was `return data` — reducer read action.payload.fraudByHour (undefined)
     } catch (err) {
       return rejectWithValue(getErrorMessage(err, 'Failed to fetch analytics'));
@@ -89,6 +99,7 @@ const analyticsSlice = createSlice({
         state.loading            = true;
         state.error              = '';
         state.analyticsRequestId = action.meta.requestId;
+        if (action.meta.arg !== undefined) state.range = action.meta.arg;
       })
       .addCase(fetchAnalyticsThunk.fulfilled, (state, action) => {
         if (action.meta.requestId !== state.analyticsRequestId) return; // N-03: stale answer
@@ -96,7 +107,9 @@ const analyticsSlice = createSlice({
         state.analyticsRequestId = null;
         state.loading          = false;
         state.fraudByHour      = action.payload.fraudByHour         ?? [];
-        state.fraudByDevice    = action.payload.fraudByPaymentMethod ?? [];  // D-P6-11
+        state.fraudByPaymentMethod = action.payload.fraudByPaymentMethod ?? [];  // D-P6-11
+        state.fraudByDevice    = action.payload.fraudByDevice        ?? [];  // A-01
+        state.scoreHistogram   = action.payload.scoreHistogram       ?? [];  // A-01
         state.fraudByLocation  = action.payload.fraudByLocation      ?? [];
         state.riskDistribution = action.payload.riskDistribution     ?? [];
         state.lossPrevented    = action.payload.lossPrevented        ?? 0;   // C-P6-11

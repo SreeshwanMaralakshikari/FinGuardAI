@@ -1,4 +1,12 @@
-import { body } from 'express-validator';
+import { body, header } from 'express-validator';
+import { PAYMENT_METHODS } from '../utils/enums.js';
+
+/** C-01: format of the optional Idempotency-Key request header. */
+export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,100}$/;
+const MIN_AMOUNT = 0.01;
+const MAX_AMOUNT = 1_000_000_000;
+/** E-07: money has 2 decimals — round half up, with a tiny epsilon against 1.005 → 1.00 float noise. */
+const roundToPaise = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 // L-10: every free-text field is required to be a STRING first (.isString().bail()),
 // then trimmed and length-capped. Before, `merchantCategory: ["CASINO"]` crashed the
@@ -11,8 +19,10 @@ export const submitTransactionRules = [
     .custom((value) => typeof value === 'number' || typeof value === 'string')
     .withMessage('Amount must be a number').bail()
     // AUD-27: upper bound — "1e400" passed isFloat and became Infinity (NaN loss / 500)
-    .isFloat({ gt: 0, max: 1_000_000_000 }).withMessage('Amount must be greater than 0 and at most ₹1,00,00,00,000')
-    .toFloat(), // AUD-10: form inputs arrive as strings — store and score a real Number
+    // E-07: the same minimum as the model (0.01), so 0.005 gets an accurate message instead of a Mongoose error.
+    .isFloat({ min: MIN_AMOUNT, max: MAX_AMOUNT }).withMessage('Amount must be at least ₹0.01 and at most ₹1,00,00,00,000')
+    .toFloat() // AUD-10: form inputs arrive as strings — store and score a real Number
+    .customSanitizer(roundToPaise), // E-07: at most 2 decimals (100.123456789 → 100.12)
 
   body('merchantName')
     .isString().withMessage('Merchant name must be a string').bail()
@@ -29,14 +39,15 @@ export const submitTransactionRules = [
 
   body('paymentMethod')
     .isString().withMessage('Payment method must be UPI, CARD, NET_BANKING, or WALLET').bail()
-    .isIn(['UPI', 'CARD', 'NET_BANKING', 'WALLET']).withMessage('Payment method must be UPI, CARD, NET_BANKING, or WALLET'),
+    .isIn(PAYMENT_METHODS).withMessage('Payment method must be UPI, CARD, NET_BANKING, or WALLET'),
 
+  // E-06: location.city is REQUIRED. Leaving it out used to disable the location rule
+  // (the model defaulted the city to "Unknown", which the rule skips). The country stays optional (default IN).
   body('location')
-    .optional()
-    .isObject().withMessage('Location must be an object with city and country fields'),
+    .isObject().withMessage('Location must be an object with a city (required) and an optional country'),
 
   body('location.city')
-    .optional()
+    .exists({ values: 'null' }).withMessage('Location city is required').bail()
     .isString().withMessage('Location city must be a string').bail()
     .trim()
     .notEmpty().withMessage('Location city cannot be an empty string')
@@ -54,4 +65,10 @@ export const submitTransactionRules = [
     .trim()
     .notEmpty().withMessage('Device ID is required')
     .isLength({ max: 128 }).withMessage('Device ID cannot exceed 128 characters'),
+
+  // C-01: optional; when present it must be 8–100 of A-Z a-z 0-9 _ - (an empty or repeated header fails too).
+  header('Idempotency-Key')
+    .optional()
+    .matches(IDEMPOTENCY_KEY_PATTERN)
+    .withMessage('Idempotency-Key must be 8 to 100 characters: letters, digits, "_" or "-"'),
 ];

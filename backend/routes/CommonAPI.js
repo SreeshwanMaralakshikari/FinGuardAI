@@ -9,6 +9,7 @@ import asyncHandler from '../middleware/asyncHandler.js';
 import { registerRules, loginRules, changePasswordRules } from '../validators/authValidators.js';
 import UserModel from '../models/UserModel.js';
 import createAuditLog from '../utils/createAuditLog.js';
+import { loginAccountThrottle, releaseLoginAttempt, clearLoginFailures } from '../utils/loginThrottle.js';
 import { disconnectUser } from '../utils/socketManager.js';
 import { getAuthCookieOptions, getClearAuthCookieOptions } from '../config/cookieOptions.js'; // [P9]
 
@@ -98,9 +99,10 @@ router.post(
 // ── POST /auth/login ──────────────────────────────────────────────────────────
 router.post(
   '/login',
-  authLimiter,
   loginRules,
   validate,
+  loginAccountThrottle, // D-02 / R-01: counts the attempt up front (5 per e-mail+IP, 30 per e-mail / 15 min → 429); before the IP limiter on purpose
+  authLimiter,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
 
@@ -111,6 +113,7 @@ router.post(
     // pays for one bcrypt comparison, so both outcomes take the same time.
     if (!user) {
       await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+      // D-02: the attempt was already counted by loginAccountThrottle — unknown e-mails count like known ones
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
@@ -126,10 +129,13 @@ router.post(
     // AUD-28: checked AFTER the password, so the 403 cannot be used to discover
     // which accounts exist and are deactivated without knowing their password.
     if (!user.isActive) {
+      releaseLoginAttempt(email, req.ip); // the password was right: not a guess, give the slot back
       await createAuditLog(user._id, user.role, 'LOGIN_FAILED', 'User', user._id.toString(),
         { email: user.email, reason: 'ACCOUNT_DEACTIVATED' }, req.ip);
       return res.status(403).json({ success: false, message: 'Account has been deactivated. Please contact support.' });
     }
+
+    clearLoginFailures(email, req.ip); // D-02: the right password ends the streak
 
     // Update lastLogin (direct set avoids triggering the password pre-save hook)
     await UserModel.findByIdAndUpdate(user._id, { lastLogin: new Date() });
@@ -189,7 +195,7 @@ router.post(
 router.get(
   '/check-auth',
   verifyTokenClearingCookie, // L-15: clears a dead cookie so the browser stops sending it
-  asyncHandler(async (req, res) => {
+  (req, res) => { // H-12: synchronous, so no asyncHandler
     res.status(200).json({
       success: true,
       data: {
@@ -202,7 +208,7 @@ router.get(
         isActive: req.user.isActive,
       },
     });
-  })
+  }
 );
 
 // ── PATCH /auth/change-password ───────────────────────────────────────────────

@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+import { getNotificationTtlSeconds } from '../config/opsSettings.js';
+
 const { Schema } = mongoose;
 
 const notificationSchema = new Schema(
@@ -63,6 +65,12 @@ const notificationSchema = new Schema(
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 notificationSchema.index({ recipientId: 1, isRead: 1, createdAt: -1 });
+// C-04: notifications expire after NOTIFICATION_TTL_DAYS (default 90; 0 = keep forever). On an existing database run
+// `npm run db:sync-indexes` once after changing the value (MongoDB will not rebuild a TTL index with other options by itself).
+const notificationTtlSeconds = getNotificationTtlSeconds();
+if (notificationTtlSeconds !== null) {
+  notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: notificationTtlSeconds });
+}
 
 const NotificationModel = mongoose.model('Notification', notificationSchema);
 

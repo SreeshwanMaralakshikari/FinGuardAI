@@ -45,3 +45,31 @@ describe('fetchTransactionByIdThunk (composite, C-P6-32)', () => {
     expect(store.getState().transactions.selectedTransaction.transaction.publicId).toBe('TXN-2026-00003');
   });
 });
+
+describe('submitTransactionThunk idempotency (C-01)', () => {
+  it('sends the key as the Idempotency-Key header and keeps it out of the body', async () => {
+    api.post.mockResolvedValueOnce({ data: { success: true, data: { id: 't1' } } });
+    const store = configureStore({ reducer: { transactions: transactionReducer } });
+    await store.dispatch(submitTransactionThunk({ amount: 5, idempotencyKey: 'key-123' }));
+    expect(api.post).toHaveBeenCalledWith('/customer-api/transactions', { amount: 5 }, { headers: { 'Idempotency-Key': 'key-123' } });
+  });
+
+  it('without a key the call is exactly as before (no third argument)', async () => {
+    api.post.mockResolvedValueOnce({ data: { success: true, data: { id: 't1' } } });
+    const store = configureStore({ reducer: { transactions: transactionReducer } });
+    await store.dispatch(submitTransactionThunk({ amount: 5 }));
+    expect(api.post.mock.calls.at(-1)).toEqual(['/customer-api/transactions', { amount: 5 }]);
+  });
+
+  it('a rejection with a response is a normal failure; without one it is flagged meta.noResponse', async () => {
+    const store = configureStore({ reducer: { transactions: transactionReducer } });
+    api.post.mockRejectedValueOnce({ response: { status: 500, data: { message: 'boom' } } });
+    const withResponse = await store.dispatch(submitTransactionThunk({ amount: 5 }));
+    expect(withResponse.payload).toBe('boom');
+    expect(withResponse.meta.noResponse).toBe(false);
+
+    api.post.mockRejectedValueOnce(Object.assign(new Error('timeout'), { isAxiosError: true, code: 'ECONNABORTED' }));
+    const noResponse = await store.dispatch(submitTransactionThunk({ amount: 5 }));
+    expect(noResponse.meta.noResponse).toBe(true);
+  });
+});

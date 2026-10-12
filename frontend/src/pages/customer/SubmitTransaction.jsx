@@ -1,9 +1,17 @@
 /**
  * @file src/pages/customer/SubmitTransaction.jsx
  * @description Submit a payment for real-time fraud scoring (react-hook-form v7).
- *   API contract (verified): amount > 0, merchantName, paymentMethod and deviceId are REQUIRED;
- *   merchantCategory / location.city / location.country are optional but must not be empty
+ *   API contract (verified): amount (0.01 – 100 crore, at most 2 decimals — E-07), merchantName,
+ *   paymentMethod, deviceId and location.city are REQUIRED (E-06: a missing city used to switch the
+ *   location rule off); merchantCategory / location.country are optional but must not be empty
  *   strings → blanks are stripped before sending. The result is FLAT (C-P6-33).
+ *   C-01: one Idempotency-Key per payment attempt — created when the form mounts, REUSED when the
+ *   user retries after a failure (so a request the server did save is not saved twice) and
+ *   replaced after a success. An error without any server response says the payment may have gone
+ *   through and points to Transaction history.
+ *   C-01 (replay): a 200 answer with `replayed: true` is a success — the original result is shown with
+ *   a short note. B-01: the result includes the per-rule score breakdown.
+ *   H-06: the result view is its own component (TransactionResult).
  *   The deviceId defaults to a stable per-browser id (utils/device.js); change it to
  *   simulate a different device.
  *   N-18: the API accepts ANY merchantCategory string (no enum), and admins can add categories on
@@ -17,13 +25,14 @@ import { useAppDispatch } from '../../store/hooks.js';
 import { submitTransactionThunk } from '../../store/slices/transactionSlice.js';
 import { BTN, CARD, formatCurrency, formatDate } from '../../utils/common.js';
 import { PAYMENT_METHODS } from '../../utils/constants.js';
-import { getDeviceId } from '../../utils/device.js';
+import { getDeviceId, newIdempotencyKey } from '../../utils/device.js';
 import { stripBlank } from '../../utils/forms.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import FormField from '../../components/common/FormField.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
+import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 // Suggestions only — any category may be typed (N-18)
@@ -39,11 +48,63 @@ const ACTION_TEXT = {
   BLOCK:   'Blocked — too risky to process.',
 };
 
+/** E-07: money has at most two decimals (a tolerance absorbs binary float noise such as 1.1 * 100). */
+const hasAtMostTwoDecimals = (v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
+
+/** C-01: shown when the server answered 200 + replayed:true (the Idempotency-Key was already used). */
+const REPLAY_NOTE = 'This payment was already processed - showing the original result.';
+
+const NO_RESPONSE_HINT = ' Your payment may still have been processed — check Transaction history before trying again.';
+
+/** The scored result of a submitted payment. */
+function TransactionResult({ result, onAnother }) {
+  return (
+    <div className="max-w-3xl">
+      <PageHeader title="Transaction result" subtitle={ACTION_TEXT[result.recommendedAction] ?? ''} />
+      <section className={`${CARD.base} ${CARD.body} space-y-6`} aria-label="Fraud analysis result">
+        {result.replayed && <Alert tone="info">{REPLAY_NOTE}</Alert>}
+        <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <DetailRow label="Transaction ID">{result.publicId}</DetailRow>
+          <DetailRow label="Amount">{formatCurrency(result.amount)}</DetailRow>
+          <DetailRow label="Status"><TxStatusBadge status={result.status} /></DetailRow>
+          <DetailRow label="Risk"><RiskBadge level={result.riskLevel} /></DetailRow>
+          <DetailRow label="Merchant">{result.merchantName}</DetailRow>
+          <DetailRow label="Recommended action">{result.recommendedAction}</DetailRow>
+          <DetailRow label="Estimated loss at risk">{formatCurrency(result.estimatedLoss)}</DetailRow>
+          <DetailRow label="Time">{formatDate(result.timestamp)}</DetailRow>
+        </dl>
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
+          <ScoreBar value={result.fraudScore} riskLevel={result.riskLevel} label="Fraud score" />
+        </div>
+        <ScoreBreakdown breakdown={result.scoreBreakdown} fraudScore={result.fraudScore} />
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Signals</p>
+          {result.reasons?.length ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+          ) : <p className="text-sm text-gray-500">No risk signals were triggered.</p>}
+        </div>
+        {result.fraudAlert && (
+          <Alert tone="warning">
+            An alert was created for this payment.{' '}
+            <Link to="/customer/fraud-alerts" className="font-medium underline">View fraud alerts</Link>
+          </Alert>
+        )}
+        <div className="flex gap-3">
+          <button type="button" className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={onAnother}>Submit another</button>
+          <Link to="/customer/transactions" className={`${BTN.base} ${BTN.secondary} ${BTN.md}`}>View history</Link>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function SubmitTransaction() {
   const dispatch = useAppDispatch();
   const deviceId = useMemo(() => getDeviceId(), []);
   const [result, setResult] = useState(null);
   const [serverError, setServerError] = useState('');
+  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey); // C-01: one key per payment attempt
   const {
     register, handleSubmit, reset, formState: { errors, isSubmitting },
   } = useForm({
@@ -63,11 +124,14 @@ export default function SubmitTransaction() {
       deviceId: values.deviceId,
       location: { city: values.city, country: values.country },
     });
-    const action = await dispatch(submitTransactionThunk(payload));
+    const action = await dispatch(submitTransactionThunk({ ...payload, idempotencyKey }));
     if (submitTransactionThunk.fulfilled.match(action)) {
+      setIdempotencyKey(newIdempotencyKey()); // C-01: done — the next payment is a new one
       setResult(action.payload); // FLAT — no .transaction sub-key (C-P6-33)
     } else {
-      setServerError(action.payload ?? 'Transaction submission failed');
+      // C-01: the SAME key stays for the retry. No HTTP response = outcome unknown.
+      const message = action.payload ?? 'Transaction submission failed';
+      setServerError(action.meta?.noResponse ? `${message}${NO_RESPONSE_HINT}` : message);
     }
   };
 
@@ -76,45 +140,7 @@ export default function SubmitTransaction() {
     reset({ amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI', deviceId, city: '', country: '' });
   };
 
-  if (result) {
-    return (
-      <div className="max-w-3xl">
-        <PageHeader title="Transaction result" subtitle={ACTION_TEXT[result.recommendedAction] ?? ''} />
-        <section className={`${CARD.base} ${CARD.body} space-y-6`} aria-label="Fraud analysis result">
-          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <DetailRow label="Transaction ID">{result.publicId}</DetailRow>
-            <DetailRow label="Amount">{formatCurrency(result.amount)}</DetailRow>
-            <DetailRow label="Status"><TxStatusBadge status={result.status} /></DetailRow>
-            <DetailRow label="Risk"><RiskBadge level={result.riskLevel} /></DetailRow>
-            <DetailRow label="Merchant">{result.merchantName}</DetailRow>
-            <DetailRow label="Recommended action">{result.recommendedAction}</DetailRow>
-            <DetailRow label="Estimated loss at risk">{formatCurrency(result.estimatedLoss)}</DetailRow>
-            <DetailRow label="Time">{formatDate(result.timestamp)}</DetailRow>
-          </dl>
-          <div>
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
-            <ScoreBar value={result.fraudScore} label="Fraud score" />
-          </div>
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Signals</p>
-            {result.reasons?.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">{result.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
-            ) : <p className="text-sm text-gray-500">No risk signals were triggered.</p>}
-          </div>
-          {result.fraudAlert && (
-            <Alert tone="warning">
-              An alert was created for this payment.{' '}
-              <Link to="/customer/fraud-alerts" className="font-medium underline">View fraud alerts</Link>
-            </Alert>
-          )}
-          <div className="flex gap-3">
-            <button type="button" className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={another}>Submit another</button>
-            <Link to="/customer/transactions" className={`${BTN.base} ${BTN.secondary} ${BTN.md}`}>View history</Link>
-          </div>
-        </section>
-      </div>
-    );
-  }
+  if (result) return <TransactionResult result={result} onAnother={another} />;
 
   return (
     <div className="max-w-3xl">
@@ -137,7 +163,11 @@ export default function SubmitTransaction() {
                 {...register('amount', {
                   required: 'Amount is required',
                   valueAsNumber: true,
-                  validate: (v) => (Number.isFinite(v) && v > 0) || 'Amount must be greater than 0',
+                  validate: {
+                    number: (v) => Number.isFinite(v) || 'Enter a valid amount',
+                    minimum: (v) => v >= 0.01 || 'Amount must be at least ₹0.01', // E-07: same minimum as the server
+                    decimals: (v) => hasAtMostTwoDecimals(v) || 'Amount can have at most 2 decimal places',
+                  },
                   max: { value: 1_000_000_000, message: 'Amount cannot exceed ₹100 crore' },
                 })}
               />
@@ -192,9 +222,21 @@ export default function SubmitTransaction() {
           />
           <FormField
             name="city"
-            label="City (optional)"
+            label="City"
             errors={errors}
-            render={(p) => <input {...p} type="text" placeholder="e.g. Mumbai" {...register('city', { maxLength: { value: 100, message: 'City is too long' } })} />}
+            hint="Where the payment is made. Required: the location check cannot run without it."
+            render={(p) => (
+              <input
+                {...p}
+                type="text"
+                placeholder="e.g. Mumbai"
+                {...register('city', {
+                  required: 'City is required',
+                  maxLength: { value: 100, message: 'City is too long' },
+                  validate: (v) => v.trim().length > 0 || 'City is required',
+                })}
+              />
+            )}
           />
           <FormField
             name="country"

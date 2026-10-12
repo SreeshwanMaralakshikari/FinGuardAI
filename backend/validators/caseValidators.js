@@ -1,7 +1,9 @@
 import { body } from 'express-validator';
+import { CASE_STATUSES } from '../utils/enums.js';
 
 export const createCaseRules = [
   body('fraudAlertId')
+    .isString().withMessage('A valid fraud alert ID is required').bail() // E-08: arrays passed isMongoId and reached Mongoose
     .isMongoId().withMessage('A valid fraud alert ID is required'),
 
   body('initialNote')
@@ -17,7 +19,7 @@ const CLOSING_STATUSES = ['RESOLVED', 'DISMISSED'];
 export const updateStatusRules = [
   body('status')
     .isString().withMessage('Status must be one of: OPEN, ASSIGNED, UNDER_REVIEW, RESOLVED, DISMISSED').bail()
-    .isIn(['OPEN', 'ASSIGNED', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'])
+    .isIn(CASE_STATUSES)
     .withMessage('Status must be one of: OPEN, ASSIGNED, UNDER_REVIEW, RESOLVED, DISMISSED'),
 
   // Required (non-empty string) when closing the case.

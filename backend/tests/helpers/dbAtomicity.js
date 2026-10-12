@@ -10,7 +10,7 @@
 import { it } from '@jest/globals';
 import mongoose from 'mongoose';
 
-export const isEmulatedDb = async () => {
+const isEmulatedDb = async () => {
   try {
     const info = await mongoose.connection.db.admin().command({ buildInfo: 1 });
     return Boolean(info.ferretdbVersion);

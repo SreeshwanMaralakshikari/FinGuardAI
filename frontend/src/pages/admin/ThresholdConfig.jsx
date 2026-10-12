@@ -3,8 +3,10 @@
  * @description Fraud-engine thresholds (local state + api, C-P7-04). GET/PATCH /admin-api/thresholds.
  *   Fields (Phase 3/4/5 SystemConfig): amountThreshold; velocityLimit.maxPerHour / maxPerDay;
  *   scoreThresholds.mediumMin / highMin / criticalMin; newDeviceWeight (0–100);
- *   locationDeviationKm (stored, not yet used by the rule engine); highRiskMerchants (list,
- *   saved upper-case). Client rules mirror the server: ordering mediumMin < highMin < criticalMin
+ *   highRiskMerchants (list, saved upper-case).
+ *   A-05: `locationDeviationKm` is stored by the server but the engine compares city names only, so
+ *   the control is HIDDEN here and the field is never sent — PATCH is a partial update, so the
+ *   stored value stays exactly as it is (it is kept for a future distance-based rule). Client rules mirror the server: ordering mediumMin < highMin < criticalMin
  *   (N-03), maxPerHour ≤ maxPerDay. A 404 means the config was never seeded — the form then starts
  *   from the engine defaults and saving creates it.
  *   FieldRow resolves nested RHF errors via getNestedError (C-P7-06).
@@ -13,9 +15,12 @@
  *   N-13: field rules are identical to the server's: mediumMin 1–98, highMin 2–99, criticalMin 3–100
  *   (integers, ascending), maxPerHour / maxPerDay integers ≥ 1 with maxPerDay ≥ maxPerHour,
  *   newDeviceWeight integer 0–100, amountThreshold 0–1e9, at most 50 merchant categories of ≤ 50 characters.
+ *   B-07: "Preview impact" POSTs the three score bands to /admin-api/thresholds/preview and shows how the last
+ *   30 days of stored scores would be re-banded (current vs proposed counts, moved up / down). It never
+ *   saves, is disabled while the three fields are invalid, and its result is hidden once a field changes.
  */
 import { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import toast from 'react-hot-toast';
 import api from '../../api/axios.js';
 import { getErrorMessage } from '../../api/errors.js';
@@ -31,7 +36,6 @@ const DEFAULTS = {
   amountThreshold: 50000,
   velocityLimit: { maxPerHour: 5, maxPerDay: 20 },
   scoreThresholds: { mediumMin: 25, highMin: 50, criticalMin: 75 },
-  locationDeviationKm: 500,
   newDeviceWeight: 20,
   highRiskMerchants: ['CASINO', 'GAMBLING', 'CRYPTO_EXCHANGE', 'ADULT', 'OFFSHORE_BETTING'],
 };
@@ -44,7 +48,6 @@ const toFormValues = (cfg) => ({
     highMin: cfg.scoreThresholds?.highMin,
     criticalMin: cfg.scoreThresholds?.criticalMin,
   },
-  locationDeviationKm: cfg.locationDeviationKm,
   newDeviceWeight: cfg.newDeviceWeight,
   highRiskMerchants: (cfg.highRiskMerchants ?? []).join(', '),
 });
@@ -56,6 +59,15 @@ const parseMerchants = (text) => [...new Set(
     .filter(Boolean),
 )];
 
+/** Same rules as the server for the three score bands (integers, 1–98 / 2–99 / 3–100, ascending). */
+const scoreBandsValid = ({ mediumMin, highMin, criticalMin } = {}) => (
+  [mediumMin, highMin, criticalMin].every(Number.isInteger)
+  && mediumMin >= 1 && mediumMin <= 98 && highMin >= 2 && highMin <= 99 && criticalMin >= 3 && criticalMin <= 100
+  && mediumMin < highMin && highMin < criticalMin
+);
+
+const BANDS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+
 const num = { valueAsNumber: true };
 const isInt = (x) => Number.isInteger(x) || 'Whole number required';
 const MAX_MERCHANTS = 50;
@@ -66,8 +78,25 @@ export default function ThresholdConfig() {
   const [saveError, setSaveError] = useState('');
   const [attempt, setAttempt] = useState(0); // Retry re-runs the load effect
   const {
-    register, handleSubmit, reset, getValues, formState: { errors, isSubmitting },
+    register, handleSubmit, reset, getValues, control, formState: { errors, isSubmitting },
   } = useForm({ defaultValues: toFormValues(DEFAULTS) });
+  const [preview, setPreview] = useState({ loading: false, error: '', data: null, key: '' });
+  const bands = useWatch({ control, name: 'scoreThresholds' });
+  const bandsKey = JSON.stringify([bands?.mediumMin, bands?.highMin, bands?.criticalMin]);
+  const canPreview = scoreBandsValid(bands);
+
+  const runPreview = async () => {
+    const scoreThresholds = { mediumMin: bands.mediumMin, highMin: bands.highMin, criticalMin: bands.criticalMin };
+    const key = bandsKey;
+    setPreview({ loading: true, error: '', data: null, key });
+    try {
+      const res = await api.post(API_PATHS.ADMIN.THRESHOLDS_PREVIEW, { scoreThresholds });
+      setPreview({ loading: false, error: '', data: res.data.data, key });
+    } catch (err) {
+      setPreview({ loading: false, error: getErrorMessage(err, 'Could not preview the change'), data: null, key });
+    }
+  };
+  const shown = preview.key === bandsKey ? preview : { loading: false, error: '', data: null, key: '' }; // stale once a field changed
 
   useEffect(() => {
     let active = true;
@@ -96,7 +125,6 @@ export default function ThresholdConfig() {
       amountThreshold: v.amountThreshold,
       velocityLimit: { maxPerHour: v.velocityLimit.maxPerHour, maxPerDay: v.velocityLimit.maxPerDay },
       scoreThresholds: { mediumMin: v.scoreThresholds.mediumMin, highMin: v.scoreThresholds.highMin, criticalMin: v.scoreThresholds.criticalMin },
-      locationDeviationKm: v.locationDeviationKm,
       newDeviceWeight: v.newDeviceWeight,
       highRiskMerchants: parseMerchants(v.highRiskMerchants),
     };
@@ -134,13 +162,11 @@ export default function ThresholdConfig() {
 
         <section className={`${CARD.base} ${CARD.body}`} aria-labelledby="th-amount">
           <h2 id="th-amount" className="mb-4 text-base font-semibold text-gray-900">Amount &amp; device</h2>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <FormField name="amountThreshold" label="High-value amount (₹)" errors={errors}
               render={(p) => <input {...p} type="number" step="any" {...register('amountThreshold', { ...num, required: 'Required', min: { value: 0, message: 'Must be 0 or more' }, max: { value: 1e9, message: 'Cannot exceed 1,000,000,000' } })} />} />
             <FormField name="newDeviceWeight" label="New-device penalty (0–100)" errors={errors}
               render={(p) => <input {...p} type="number" step={1} {...register('newDeviceWeight', { ...num, required: 'Required', min: { value: 0, message: 'Must be 0 or more' }, max: { value: 100, message: 'Cannot exceed 100' }, validate: isInt })} />} />
-            <FormField name="locationDeviationKm" label="Location deviation (km)" errors={errors} hint="Stored for later; the engine compares city names today."
-              render={(p) => <input {...p} type="number" step="any" {...register('locationDeviationKm', { ...num, required: 'Required', min: { value: 0, message: 'Must be 0 or more' }, max: { value: 1_000_000, message: 'Cannot exceed 1,000,000' } })} />} />
           </div>
         </section>
 
@@ -204,6 +230,43 @@ export default function ThresholdConfig() {
                   validate: isInt,
                 })} />
               )} />
+          </div>
+          <div className="mt-5 border-t border-gray-100 pt-4">
+            <button type="button" disabled={!canPreview || preview.loading} className={`${BTN.base} ${BTN.secondary} ${BTN.md}`} onClick={runPreview}>
+              {preview.loading ? 'Calculating…' : 'Preview impact'}
+            </button>
+            <span className="ml-3 text-xs text-gray-500">Does not save anything.{!canPreview && ' Fix the three band values first.'}</span>
+            <div className="mt-3" aria-live="polite">
+              <Alert tone="error">{shown.error}</Alert>
+              {shown.data && (
+                <div>
+                  <p className="text-sm text-gray-700">
+                    Last {shown.data.windowDays} days, {shown.data.total.toLocaleString('en-IN')} transactions.
+                    {' '}Moved up: <span className="font-semibold">{shown.data.moved.up}</span>,
+                    {' '}moved down: <span className="font-semibold">{shown.data.moved.down}</span>,
+                    {' '}unchanged: <span className="font-semibold">{shown.data.moved.unchanged}</span>.
+                  </p>
+                  <table className="mt-2 w-full max-w-md text-left text-sm">
+                    <caption className="sr-only">Transactions per risk level with the current and the proposed bands</caption>
+                    <thead><tr className="text-xs text-gray-500"><th scope="col" className="py-1 pr-4 font-medium">Risk level</th><th scope="col" className="py-1 pr-4 font-medium">Current</th><th scope="col" className="py-1 pr-4 font-medium">Proposed</th><th scope="col" className="py-1 font-medium">Change</th></tr></thead>
+                    <tbody>
+                      {BANDS.map((b) => {
+                        const diff = (shown.data.proposed?.[b] ?? 0) - (shown.data.current?.[b] ?? 0);
+                        return (
+                          <tr key={b}>
+                            <th scope="row" className="py-0.5 pr-4 font-medium">{b}</th>
+                            <td className="pr-4">{shown.data.current?.[b] ?? 0}</td>
+                            <td className="pr-4">{shown.data.proposed?.[b] ?? 0}</td>
+                            <td>{diff > 0 ? `+${diff}` : diff}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {shown.data.note && <p className="mt-2 text-xs text-gray-500">{shown.data.note}</p>}
+                </div>
+              )}
+            </div>
           </div>
         </section>
 

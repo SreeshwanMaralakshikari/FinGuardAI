@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { ALERT_STATUSES, RISK_LEVELS } from '../utils/enums.js';
 
 const { Schema } = mongoose;
 
@@ -33,7 +34,7 @@ const fraudAlertSchema = new Schema(
     riskLevel: {
       type: String,
       enum: {
-        values: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+        values: [...RISK_LEVELS],
         message: 'Risk level must be LOW, MEDIUM, HIGH, or CRITICAL',
       },
       required: [true, 'Risk level is required'],
@@ -51,8 +52,8 @@ const fraudAlertSchema = new Schema(
     status: {
       type: String,
       enum: {
-        values: ['OPEN', 'REVIEWED', 'DISMISSED'],
-        message: 'Alert status must be OPEN, REVIEWED, or DISMISSED',
+        values: [...ALERT_STATUSES],
+        message: 'Alert status must be OPEN, REVIEWED, DISMISSED, or ACKNOWLEDGED',
       },
       default: 'OPEN',
     },
@@ -65,7 +66,9 @@ const fraudAlertSchema = new Schema(
 // ── Indexes ───────────────────────────────────────────────────────────────────
 fraudAlertSchema.index({ userId: 1, status: 1 });
 fraudAlertSchema.index({ riskLevel: 1, createdAt: -1 });
-fraudAlertSchema.index({ transactionId: 1 }); // analyst detail view looks the alert up by transaction (L-15)
+// C-02: one alert per transaction (the only creation path is POST /customer-api/transactions, once per
+// transaction). Also the lookup index of the analyst detail view (L-15) and what makes the insert retry idempotent.
+fraudAlertSchema.index({ transactionId: 1 }, { unique: true });
 
 const FraudAlertModel = mongoose.model('FraudAlert', fraudAlertSchema);
 

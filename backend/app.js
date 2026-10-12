@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import mongoose from 'mongoose';
 
 import { corsOptions } from './config/corsOptions.js';          // [P9]
+import { isProductionLike } from './config/environment.js';   // D-03
 import originGuard from './middleware/originGuard.js';          // [P9]
 import CommonAPI from './routes/CommonAPI.js';
 import CustomerAPI from './routes/CustomerAPI.js';
@@ -39,11 +40,10 @@ const APP_VERSION = (() => {
 // Without this, every user shares the proxy's IP → one shared rate limit.
 // Verify after deploy: the ipAddress in your USER_LOGIN audit log entry must
 // equal your public IP. If it does not, set TRUST_PROXY to the hop count.
-const isProduction = process.env.NODE_ENV === 'production';
 const parseTrustProxy = () => {
   const hops = Number.parseInt(process.env.TRUST_PROXY ?? '', 10);
   if (Number.isInteger(hops) && hops >= 0) return hops;
-  return isProduction ? 1 : 0; // unset / invalid → safe default
+  return isProductionLike() ? 1 : 0; // unset / invalid → safe default (D-03: only development|test trusts no proxy)
 };
 app.set('trust proxy', parseTrustProxy());
 
@@ -89,6 +89,15 @@ app.get('/health', (req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     timestamp: new Date().toISOString(),
   });
+});
+
+// D-07: authenticated JSON must never be stored by a browser cache or a shared proxy
+// (the next person on the same machine could otherwise read it from the back/forward cache).
+// /health sets its own header; the static 404 below needs none.
+const NO_STORE_PREFIXES = ['/auth', '/customer-api', '/analyst-api', '/admin-api', '/notification-api'];
+app.use(NO_STORE_PREFIXES, (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
 });
 
 app.use('/auth',             CommonAPI);

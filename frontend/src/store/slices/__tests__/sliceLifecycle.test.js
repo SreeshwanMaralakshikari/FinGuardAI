@@ -41,6 +41,12 @@ describe.each(Object.entries(slices))('%s slice', (name, mod) => {
       : undefined;
     const store = configureStore({ reducer: { [name]: mod.default }, preloadedState });
     const action = await store.dispatch(mod[key](thunkArg));
+    if (key === 'logoutThunk') {
+      // E-01: any HTTP answer (even a 500) means the server replied → the client is signed out cleanly
+      expect(action.type.endsWith('/fulfilled')).toBe(true);
+      expect(store.getState()[name].loading).toBe(false);
+      return;
+    }
     expect(action.type.endsWith('/rejected')).toBe(true);
     expect(typeof action.payload).toBe('string');
     const state = store.getState()[name];

@@ -21,6 +21,76 @@ import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
+/** H-06: the result panel of a found device (props in, JSX out). */
+function DeviceDetails({ d, recent }) {
+  return (
+    <div className="space-y-6">
+      <section className={`${CARD.base} ${CARD.body}`} aria-label="Reputation">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="break-all text-base font-semibold text-gray-900">{d.deviceId}</h2>
+          {d.isBlacklisted
+            ? <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">BLACKLISTED</span>
+            : <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Not blacklisted</span>}
+        </div>
+        <div className="mt-4 max-w-md">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Reputation score (higher is safer)</p>
+          <ScoreBar value={d.reputationScore} invert label="Reputation score" />
+        </div>
+        <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <DetailRow label="Flags">{d.flagCount}</DetailRow>
+          <DetailRow label="Fraud transactions">{d.fraudTransactionCount}</DetailRow>
+          <DetailRow label="First seen">{formatDate(d.firstSeenAt)}</DetailRow>
+          <DetailRow label="Last seen">{formatDate(d.lastSeenAt)}</DetailRow>
+        </dl>
+      </section>
+
+      <section aria-labelledby="assoc">
+        <h2 id="assoc" className="mb-3 text-base font-semibold text-gray-900">Customers who used this device ({d.associatedUserIds?.length ?? 0})</h2>
+        {(d.associatedUserIds ?? []).length === 0 ? <p className="text-sm text-gray-500">None recorded.</p> : (
+          <div className={TABLE.wrapper}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}><tr>{['Name', 'Email', 'Role', 'Trust score'].map((h) => <th key={h} className={TABLE.th}>{h}</th>)}</tr></thead>
+              <tbody className={TABLE.tbody}>
+                {d.associatedUserIds.map((u) => (
+                  <tr key={u._id} className={TABLE.tr}>
+                    <td className={TABLE.td}>{u.name}</td><td className={TABLE.td}>{u.email}</td>
+                    <td className={TABLE.td}>{u.role}</td><td className={TABLE.td}>{u.trustScore}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="recent-dev">
+        <h2 id="recent-dev" className="mb-3 text-base font-semibold text-gray-900">Recent transactions</h2>
+        {recent.length === 0 ? <p className="text-sm text-gray-500">No transactions.</p> : (
+          <div className={TABLE.wrapper}>
+            <table className={TABLE.table}>
+              <thead className={TABLE.thead}><tr>{['ID', 'Customer', 'Merchant', 'Amount', 'Score', 'Risk', 'Status', 'Date'].map((h) => <th key={h} className={TABLE.th}>{h}</th>)}</tr></thead>
+              <tbody className={TABLE.tbody}>
+                {recent.map((t) => (
+                  <tr key={t._id} className={TABLE.tr}>
+                    <td className={TABLE.td}>{t.publicId}</td>
+                    <td className={TABLE.td}>{t.userId?.name ?? '—'}</td>
+                    <td className={TABLE.td}>{t.merchantName}</td>
+                    <td className={TABLE.td}>{formatCurrency(t.amount)}</td>
+                    <td className={TABLE.td}>{t.fraudScore}</td>
+                    <td className={TABLE.td}><RiskBadge level={t.riskLevel} /></td>
+                    <td className={TABLE.td}><TxStatusBadge status={t.status} /></td>
+                    <td className={TABLE.td}>{formatDate(t.timestamp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export default function DeviceReputation() {
   const [params, setParams] = useSearchParams();
   const deviceId = (params.get('deviceId') ?? '').trim();
@@ -37,10 +107,10 @@ export default function DeviceReputation() {
 
   // N-05: the URL is the single source of truth. Submitting only changes the URL; this ONE lookup
   // reacts to it (it used to be fired twice per search: once by setParams, once directly).
-  const lookup = useFetch(async () => {
+  const lookup = useFetch(async (signal) => {
     if (!deviceId) return null;
     try {
-      const res = await api.get(`${API_PATHS.ANALYST.DEVICE_REPUTATION}/${encodeURIComponent(deviceId)}`);
+      const res = await api.get(`${API_PATHS.ANALYST.DEVICE_REPUTATION}/${encodeURIComponent(deviceId)}`, { signal });
       return { found: true, ...res.data.data };
     } catch (err) {
       if (err?.response?.status === 404) return { found: false }; // "not in the registry" is a result, not an error
@@ -79,72 +149,7 @@ export default function DeviceReputation() {
       {deviceId && !lookup.loading && <LoadError message={lookup.error} onRetry={lookup.reload} />}
       {result && !result.found && <EmptyState title="Device not found" message="This device has no reputation record yet — it has not been seen in a scored transaction." />}
 
-      {d && (
-        <div className="space-y-6">
-          <section className={`${CARD.base} ${CARD.body}`} aria-label="Reputation">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="break-all text-base font-semibold text-gray-900">{d.deviceId}</h2>
-              {d.isBlacklisted
-                ? <span className="inline-flex items-center rounded-full border border-red-300 bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">BLACKLISTED</span>
-                : <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Not blacklisted</span>}
-            </div>
-            <div className="mt-4 max-w-md">
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Reputation score (higher is safer)</p>
-              <ScoreBar value={d.reputationScore} invert label="Reputation score" />
-            </div>
-            <dl className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <DetailRow label="Flags">{d.flagCount}</DetailRow>
-              <DetailRow label="Fraud transactions">{d.fraudTransactionCount}</DetailRow>
-              <DetailRow label="First seen">{formatDate(d.firstSeenAt)}</DetailRow>
-              <DetailRow label="Last seen">{formatDate(d.lastSeenAt)}</DetailRow>
-            </dl>
-          </section>
-
-          <section aria-labelledby="assoc">
-            <h2 id="assoc" className="mb-3 text-base font-semibold text-gray-900">Customers who used this device ({d.associatedUserIds?.length ?? 0})</h2>
-            {(d.associatedUserIds ?? []).length === 0 ? <p className="text-sm text-gray-500">None recorded.</p> : (
-              <div className={TABLE.wrapper}>
-                <table className={TABLE.table}>
-                  <thead className={TABLE.thead}><tr>{['Name', 'Email', 'Role', 'Trust score'].map((h) => <th key={h} className={TABLE.th}>{h}</th>)}</tr></thead>
-                  <tbody className={TABLE.tbody}>
-                    {d.associatedUserIds.map((u) => (
-                      <tr key={u._id} className={TABLE.tr}>
-                        <td className={TABLE.td}>{u.name}</td><td className={TABLE.td}>{u.email}</td>
-                        <td className={TABLE.td}>{u.role}</td><td className={TABLE.td}>{u.trustScore}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-
-          <section aria-labelledby="recent-dev">
-            <h2 id="recent-dev" className="mb-3 text-base font-semibold text-gray-900">Recent transactions</h2>
-            {recent.length === 0 ? <p className="text-sm text-gray-500">No transactions.</p> : (
-              <div className={TABLE.wrapper}>
-                <table className={TABLE.table}>
-                  <thead className={TABLE.thead}><tr>{['ID', 'Customer', 'Merchant', 'Amount', 'Score', 'Risk', 'Status', 'Date'].map((h) => <th key={h} className={TABLE.th}>{h}</th>)}</tr></thead>
-                  <tbody className={TABLE.tbody}>
-                    {recent.map((t) => (
-                      <tr key={t._id} className={TABLE.tr}>
-                        <td className={TABLE.td}>{t.publicId}</td>
-                        <td className={TABLE.td}>{t.userId?.name ?? '—'}</td>
-                        <td className={TABLE.td}>{t.merchantName}</td>
-                        <td className={TABLE.td}>{formatCurrency(t.amount)}</td>
-                        <td className={TABLE.td}>{t.fraudScore}</td>
-                        <td className={TABLE.td}><RiskBadge level={t.riskLevel} /></td>
-                        <td className={TABLE.td}><TxStatusBadge status={t.status} /></td>
-                        <td className={TABLE.td}>{formatDate(t.timestamp)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        </div>
-      )}
+      {d && <DeviceDetails d={d} recent={recent} />}
     </div>
   );
 }

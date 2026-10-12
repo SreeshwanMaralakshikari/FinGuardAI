@@ -13,6 +13,8 @@
  * @phase Phase 9 — Deployment
  */
 
+import { isProductionLike } from './environment.js';
+
 const DEV_DEFAULT_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
 
 /**
@@ -24,7 +26,7 @@ export const getAllowedOrigins = () => {
     .map((origin) => origin.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 
-  if (process.env.NODE_ENV === 'production') return fromEnv;
+  if (isProductionLike()) return fromEnv; // D-03: localhost origins only for NODE_ENV=development|test
   return [...new Set([...fromEnv, ...DEV_DEFAULT_ORIGINS])];
 };
 
@@ -50,6 +52,9 @@ export const corsOptions = {
   },
   credentials: true, // required for the HTTP-only `token` cookie
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'], // C-01: the browser preflight must accept the retry-safety header
+  // D-06: without this a browser hides the rate-limit headers from JavaScript, so the UI
+  // could not tell a 429 user how long to wait.
+  exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset', 'RateLimit-Policy', 'Retry-After'],
   maxAge: 600, // cache preflight responses for 10 minutes
 };

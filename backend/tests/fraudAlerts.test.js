@@ -1,7 +1,7 @@
 // tests/fraudAlerts.test.js — customer fraud alerts + notifications (Phase 4 CustomerAPI / NotificationAPI)
 import { beforeAll, afterAll, beforeEach, describe, it, expect } from '@jest/globals';
 import { connectTestDB, disconnectTestDB, clearCollections } from './setup.js';
-import { seedUser, seedAnalyst } from './helpers/seedUser.js';
+import { seedUser, seedAnalyst, uniqueEmail } from './helpers/seedUser.js';
 import { seedConfig } from './helpers/seedConfig.js';
 import { loginAgent } from './helpers/authAgent.js';
 
@@ -9,10 +9,10 @@ beforeAll(connectTestDB);
 afterAll(disconnectTestDB);
 beforeEach(async () => { await clearCollections(); await seedConfig(); });
 
-const casino = { amount: 500, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'dev-1' };
+const casino = { amount: 500, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'dev-1', location: { city: 'Mumbai', country: 'IN' } };
 
 async function customerWithAlert() {
-  const { user, password } = await seedUser({ email: `alerts${Date.now()}@test.com` });
+  const { user, password } = await seedUser({ email: uniqueEmail('alerts') });
   const agent = await loginAgent(user.email, password);
   const res = await agent.post('/customer-api/transactions').send(casino);
   return { user, agent, alertId: res.body.data.fraudAlert.id };

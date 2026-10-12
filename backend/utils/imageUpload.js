@@ -13,7 +13,21 @@
  */
 import cloudinary from '../config/cloudinary.js';
 
-export const PROFILE_FOLDER = 'finguardai/profiles';
+const PROFILE_FOLDER = 'finguardai/profiles';
+
+/**
+ * D-08: what Cloudinary is allowed to store. The magic-byte check already limits uploads to
+ * JPEG / PNG / WebP; these options make Cloudinary enforce the same list itself, shrink
+ * oversized pictures to at most 512 × 512 (profile avatars; never upscaled, aspect ratio kept)
+ * and give every file a unique name so two users' uploads can never overwrite each other.
+ */
+export const getProfileUploadOptions = () => ({ // a fresh object per upload: the SDK is free to modify what it is given
+  folder: PROFILE_FOLDER,
+  resource_type: 'image',
+  allowed_formats: ['jpg', 'png', 'webp'],
+  transformation: [{ width: 512, height: 512, crop: 'limit' }],
+  unique_filename: true,
+});
 
 /**
  * @param {Buffer|Uint8Array|undefined} buffer
@@ -39,7 +53,7 @@ export const detectImageType = (buffer) => {
 export const uploadProfileImage = (buffer) =>
   new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
-      { folder: PROFILE_FOLDER, resource_type: 'image' },
+      getProfileUploadOptions(),
       (error, result) => (error ? reject(error) : resolve(result))
     );
     stream.end(buffer);

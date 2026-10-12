@@ -47,26 +47,6 @@ export const CASE_STATUSES = Object.freeze({
   DISMISSED:     'DISMISSED',
 });
 
-// ─── Transaction Status Enum ──────────────────────────────────────────────────
-// Matches Phase 3 TransactionModel.status enum: ['APPROVED', 'HELD', 'BLOCKED']
-// C-P6-07: corrected from incorrect PENDING/COMPLETED/FLAGGED/REVERSED
-
-export const TX_STATUSES = Object.freeze({
-  APPROVED: 'APPROVED',
-  HELD:     'HELD',
-  BLOCKED:  'BLOCKED',
-});
-
-// ─── Notification Type Enum ───────────────────────────────────────────────────
-// Matches Phase 3 NotificationModel.type enum: ['FRAUD_ALERT', 'CASE_ASSIGNED', 'CASE_STATUS_CHANGED']
-// C-P6-09: corrected from incorrect FRAUD_ALERT/TRANSACTION_UPDATE/CASE_UPDATE/SYSTEM
-
-export const NOTIFICATION_TYPES = Object.freeze({
-  FRAUD_ALERT:          'FRAUD_ALERT',
-  CASE_ASSIGNED:        'CASE_ASSIGNED',
-  CASE_STATUS_CHANGED:  'CASE_STATUS_CHANGED',
-});
-
 // ─── API Paths ────────────────────────────────────────────────────────────────
 // Frozen object — single source of truth for all endpoint strings.
 // Dynamic segments (:id) are appended at thunk call site:
@@ -87,6 +67,8 @@ export const API_PATHS = Object.freeze({
     TRANSACTION_BY_ID:  '/customer-api/transactions',  // append /:id
     FRAUD_ALERTS:       '/customer-api/fraud-alerts',
     ALERT_BY_ID:        '/customer-api/fraud-alerts',  // append /:id
+    ALERT_ACK_SUFFIX:   'acknowledge',                 // PATCH /customer-api/fraud-alerts/:id/acknowledge (F-02)
+    TIMELINE:           '/customer-api/timeline',      // A-02
     TRUST_SCORE:        '/customer-api/trust-score',
     PROFILE:            '/customer-api/profile',
   }),
@@ -113,6 +95,9 @@ export const API_PATHS = Object.freeze({
     SIMULATE_START: '/admin-api/simulation/start',
     SIMULATE_STOP:  '/admin-api/simulation/stop',
     THRESHOLDS:     '/admin-api/thresholds',
+    THRESHOLDS_PREVIEW: '/admin-api/thresholds/preview', // B-07 (POST, never saves)
+    SIMULATE_GENERATE: '/admin-api/simulation/generate', // A-08 (POST {count})
+    SIMULATE_DATA:  '/admin-api/simulation/data',       // A-08 (DELETE)
     AUDIT_LOGS:     '/admin-api/audit-logs',
   }),
 
@@ -133,6 +118,12 @@ export const PAGINATION = Object.freeze({
   DEFAULT_LIMIT_STANDARD: 10,   // customer endpoints
   DEFAULT_LIMIT_CASES:    20,   // analyst + notification endpoints
   DEFAULT_LIMIT_ADMIN:    50,   // admin endpoints (D-P4-12)
+});
+
+// B-02: what a CLOSED case means for the payment (shown next to the status)
+export const CASE_OUTCOME = Object.freeze({
+  RESOLVED:  'Fraud confirmed - payment blocked',
+  DISMISSED: 'False positive - payment released',
 });
 
 // ─── Case workflow (mirrors the server, which enforces it and answers 400 otherwise) ──

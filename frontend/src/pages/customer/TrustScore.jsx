@@ -2,6 +2,10 @@
  * @file src/pages/customer/TrustScore.jsx
  * @description SVG meter + behaviour summary. The score is read from GET /customer-api/trust-score
  *   on mount (AUD-09). Bands: Excellent 80–100, Good 60–79, Fair 40–59, Poor 0–39.
+ *   E-19: band label colours are the -700 shades (the -600 ones fail the 4.5:1 text contrast).
+ *   F-09: "How is this calculated?" shows the server's formula and, from the data the endpoint
+ *   already returns (behaviorSummary), the live payment counts of the last hour / 24 hours. The
+ *   per-outcome counts behind the score are NOT part of the response, so none are invented.
  *   Recent activity = last 5 transactions, loaded into LOCAL state (N-08: not the Redux keys of the
  *   Transactions page). N-02: failures show the error + Retry.
  */
@@ -16,8 +20,8 @@ import DetailRow from '../../components/common/DetailRow.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 const BANDS = [
-  { min: 80, label: 'Excellent', stroke: 'stroke-emerald-500', text: 'text-emerald-600' },
-  { min: 60, label: 'Good',      stroke: 'stroke-green-500',   text: 'text-green-600' },
+  { min: 80, label: 'Excellent', stroke: 'stroke-emerald-500', text: 'text-emerald-700' },
+  { min: 60, label: 'Good',      stroke: 'stroke-green-500',   text: 'text-green-700' },
   { min: 40, label: 'Fair',      stroke: 'stroke-yellow-500',  text: 'text-yellow-700' },
   { min: 0,  label: 'Poor',      stroke: 'stroke-red-500',     text: 'text-red-600' },
 ];
@@ -27,11 +31,11 @@ const CIRC = 2 * Math.PI * RADIUS;
 
 export default function TrustScore() {
   const { data, loading, error, reload } = useFetch(
-    async () => (await api.get(API_PATHS.CUSTOMER.TRUST_SCORE)).data.data,
+    async (signal) => (await api.get(API_PATHS.CUSTOMER.TRUST_SCORE, { signal })).data.data,
     [],
   );
   const recent = useFetch(
-    async () => (await api.get(API_PATHS.CUSTOMER.TRANSACTIONS, { params: { limit: 5 } })).data.data ?? [],
+    async (signal) => (await api.get(API_PATHS.CUSTOMER.TRANSACTIONS, { params: { limit: 5 }, signal })).data.data ?? [],
     [],
   );
   const transactions = recent.data ?? [];
@@ -83,10 +87,31 @@ export default function TrustScore() {
               <DetailRow label="Updated">{formatDate(summary.lastUpdated)}</DetailRow>
               <DetailRow label="Usual cities">{summary.usualLocations?.join(', ') || '—'}</DetailRow>
               <DetailRow label="Usual methods">{summary.usualPaymentMethods?.map((m) => m.replace('_', ' ')).join(', ') || '—'}</DetailRow>
+              {summary.transactionVelocity && (
+                <>
+                  <DetailRow label="Payments in the last hour">{summary.transactionVelocity.perHour}</DetailRow>
+                  <DetailRow label="Payments in the last 24 hours">{summary.transactionVelocity.perDay}</DetailRow>
+                </>
+              )}
             </dl>
           )}
         </section>
       </div>
+
+      <section className={`${CARD.base} mt-6 p-6`} aria-labelledby="trust-explainer">
+        <h2 id="trust-explainer" className="text-base font-semibold text-gray-900">How is this calculated?</h2>
+        <p className="mt-2 text-sm text-gray-700">
+          After every payment your score is recalculated from your own history:
+        </p>
+        <p className="mt-2 rounded-lg bg-gray-50 px-4 py-3 font-mono text-sm text-gray-900">
+          score = (approved + ½ × held + 1) ÷ (all payments + 2) × 100
+        </p>
+        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">
+          <li>Approved payments count fully, held payments count half, blocked payments count nothing.</li>
+          <li>A new account starts at 50. Ten approved payments give 92; ten approved and two blocked give 79.</li>
+          <li>The “usual behaviour” above is the baseline the fraud check compares new payments with; it is built from low-risk approved payments only.</li>
+        </ul>
+      </section>
 
       <section className="mt-8" aria-labelledby="recent-activity">
         <h2 id="recent-activity" className="mb-3 text-base font-semibold text-gray-900">Recent activity</h2>

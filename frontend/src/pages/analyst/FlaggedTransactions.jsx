@@ -19,20 +19,138 @@ import {
   fetchFlaggedTransactionsThunk, fetchFlaggedTransactionByIdThunk, clearSelectedFlagged,
 } from '../../store/slices/fraudAlertSlice.js';
 import { createCaseThunk } from '../../store/slices/fraudCaseSlice.js';
-import { BTN, INPUT, TABLE, formatCurrency, formatDate } from '../../utils/common.js';
+import { BTN, INPUT, TABLE, formatCurrency, formatDate, formatLocation } from '../../utils/common.js';
 import { PAGINATION } from '../../utils/constants.js';
 import { dateRangeParams } from '../../utils/dates.js';
+import { exportRowsToCsv } from '../../utils/csv.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Pagination from '../../components/common/Pagination.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
 import Spinner from '../../components/common/Spinner.jsx';
+import TableSkeleton from '../../components/common/TableSkeleton.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import BusyRegion from '../../components/common/BusyRegion.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
+import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
 import { RiskBadge, TxStatusBadge, CaseStatusBadge, AlertStatusBadge } from '../../components/common/Badges.jsx';
+
+// F-11: "Export CSV" writes the rows of the page that is loaded right now.
+const CSV_COLUMNS = [
+  { header: 'Transaction', value: (tx) => tx.publicId },
+  { header: 'Customer', value: (tx) => tx.userId?.name },
+  { header: 'Merchant', value: (tx) => tx.merchantName },
+  { header: 'Amount (INR)', value: (tx) => tx.amount },
+  { header: 'Score', value: (tx) => tx.fraudScore },
+  { header: 'Risk', value: (tx) => tx.riskLevel },
+  { header: 'Status', value: (tx) => tx.status },
+  { header: 'Date (IST)', value: (tx) => formatDate(tx.timestamp) },
+];
+
+// ─── H-06: pieces split out of FlaggedTransactions (props in, JSX out) ──────────────────────
+
+function FlaggedTable({ items, loading, onOpen }) {
+  return (
+    <BusyRegion busy={loading}>
+      <div className={TABLE.wrapper}>
+        <table className={TABLE.table}>
+          <thead className={TABLE.thead}>
+            <tr>{['', 'ID', 'Customer', 'Merchant', 'Amount', 'Score', 'Risk', 'Status', 'Date'].map((h) => <th key={h || 'a'} className={TABLE.th}>{h ? h : <span className="sr-only">Actions</span>}</th>)}</tr>
+          </thead>
+          <tbody className={TABLE.tbody}>
+            {items.map((tx) => (
+              <tr key={tx._id} className={TABLE.tr}>
+                <td className={TABLE.td}><button type="button" className={`${BTN.base} ${BTN.primary} ${BTN.sm}`} onClick={() => onOpen(tx._id)} aria-label={`Investigate ${tx.publicId}`}>Investigate</button></td>
+                <td className={TABLE.td}>{tx.publicId}</td>
+                <td className={TABLE.td}>{tx.userId?.name ?? '—'}</td>
+                <td className={TABLE.td}>{tx.merchantName}</td>
+                <td className={TABLE.td}>{formatCurrency(tx.amount)}</td>
+                <td className={TABLE.td}>{tx.fraudScore}</td>
+                <td className={TABLE.td}><RiskBadge level={tx.riskLevel} /></td>
+                <td className={TABLE.td}><TxStatusBadge status={tx.status} /></td>
+                <td className={TABLE.td}>{formatDate(tx.timestamp)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </BusyRegion>
+  );
+}
+
+function InvestigationDetail({ ctx, t, dev, note, onNote, creating, onOpenCase, onClose }) {
+  return (
+    <div className="space-y-6">
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <DetailRow label="Transaction">{t.publicId}</DetailRow>
+        <DetailRow label="Amount">{formatCurrency(t.amount)}</DetailRow>
+        <DetailRow label="Date">{formatDate(t.timestamp)}</DetailRow>
+        <DetailRow label="Customer">{t.userId?.name} <span className="text-gray-500">({t.userId?.email})</span></DetailRow>
+        <DetailRow label="Customer trust score">{t.userId?.trustScore}</DetailRow>
+        <DetailRow label="Merchant">{t.merchantName} {t.merchantCategory && <span className="text-gray-500">· {t.merchantCategory}</span>}</DetailRow>
+        <DetailRow label="Payment method">{t.paymentMethod?.replace('_', ' ')}</DetailRow>
+        <DetailRow label="Location">{formatLocation(t.location)}</DetailRow>
+        <DetailRow label="IP address">{t.ipAddress}</DetailRow>
+        <DetailRow label="Status"><TxStatusBadge status={t.status} /></DetailRow>
+        <DetailRow label="Risk"><RiskBadge level={t.riskLevel} /></DetailRow>
+        <DetailRow label="Recommended action">{t.recommendedAction}</DetailRow>
+      </dl>
+
+      <div>
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
+        <ScoreBar value={t.fraudScore} riskLevel={t.riskLevel} label="Fraud score" />
+        {t.reasons?.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">{t.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
+      </div>
+
+      <ScoreBreakdown breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
+
+      <div>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Device</p>
+        <p className="text-sm text-gray-700">
+          <Link className="font-medium text-primary-600 hover:underline" to={`/analyst/device-reputation?deviceId=${encodeURIComponent(t.deviceId)}`}>{t.deviceId}</Link>
+        </p>
+        {dev ? (
+          <div className="mt-2 space-y-2">
+            <ScoreBar value={dev.reputationScore} invert label="Device reputation" />
+            <p className="text-xs text-gray-500">
+              {dev.flagCount} flags · {dev.fraudTransactionCount} fraud transactions · {dev.isBlacklisted ? 'BLACKLISTED' : 'not blacklisted'} ·
+              shared by {dev.associatedUserIds?.length ?? 0} customer(s)
+            </p>
+          </div>
+        ) : <p className="mt-1 text-sm text-gray-500">No reputation record for this device.</p>}
+      </div>
+
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-gray-900">Investigation</p>
+          {ctx.fraudAlert && <AlertStatusBadge status={ctx.fraudAlert.status} />}
+        </div>
+        {ctx.existingCase ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className="text-sm text-gray-700">Case {ctx.existingCase.publicId}</span>
+            <CaseStatusBadge status={ctx.existingCase.status} />
+            {ctx.existingCase.assignedAnalystId?.name && <span className="text-xs text-gray-500">assigned to {ctx.existingCase.assignedAnalystId.name}</span>}
+            <Link to={`/analyst/cases/${ctx.existingCase._id}`} className={`${BTN.base} ${BTN.primary} ${BTN.sm}`} onClick={onClose}>Open case</Link>
+          </div>
+        ) : ctx.fraudAlert ? (
+          <div className="mt-3 space-y-3">
+            <div>
+              <label htmlFor="initial-note" className={INPUT.label}>Initial note (optional)</label>
+              <textarea id="initial-note" rows={3} maxLength={2000} className={INPUT.base} value={note} onChange={(e) => onNote(e.target.value)} />
+            </div>
+            <button type="button" disabled={creating} className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={onOpenCase}>
+              {creating ? 'Opening…' : 'Open investigation case'}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-gray-500">This transaction has no fraud alert, so a case cannot be opened for it.</p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function FlaggedTransactions() {
   const dispatch = useAppDispatch();
@@ -97,7 +215,20 @@ export default function FlaggedTransactions() {
 
   return (
     <div>
-      <PageHeader title="Flagged transactions" subtitle="HIGH and CRITICAL risk payments from all customers." />
+      <PageHeader
+        title="Flagged transactions"
+        subtitle="HIGH and CRITICAL risk payments from all customers."
+        actions={(
+          <button
+            type="button"
+            disabled={flagged.items.length === 0}
+            className={`${BTN.base} ${BTN.secondary} ${BTN.sm}`}
+            onClick={() => exportRowsToCsv('flagged-transactions', CSV_COLUMNS, flagged.items)}
+          >
+            Export CSV
+          </button>
+        )}
+      />
 
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -125,33 +256,10 @@ export default function FlaggedTransactions() {
 
       {error ? (
         <LoadError message={error} onRetry={() => setAttempt((n) => n + 1)} />
-      ) : loading && flagged.items.length === 0 ? <Spinner /> : flagged.items.length === 0 ? (
+      ) : loading && flagged.items.length === 0 ? <TableSkeleton cols={9} /> : flagged.items.length === 0 ? (
         <EmptyState title="No flagged transactions" message="Nothing matches these filters." />
       ) : (
-        <BusyRegion busy={loading}>
-          <div className={TABLE.wrapper}>
-            <table className={TABLE.table}>
-              <thead className={TABLE.thead}>
-                <tr>{['', 'ID', 'Customer', 'Merchant', 'Amount', 'Score', 'Risk', 'Status', 'Date'].map((h) => <th key={h || 'a'} className={TABLE.th}>{h ? h : <span className="sr-only">Actions</span>}</th>)}</tr>
-              </thead>
-              <tbody className={TABLE.tbody}>
-                {flagged.items.map((tx) => (
-                  <tr key={tx._id} className={TABLE.tr}>
-                    <td className={TABLE.td}><button type="button" className={`${BTN.base} ${BTN.primary} ${BTN.sm}`} onClick={() => open(tx._id)} aria-label={`Investigate ${tx.publicId}`}>Investigate</button></td>
-                    <td className={TABLE.td}>{tx.publicId}</td>
-                    <td className={TABLE.td}>{tx.userId?.name ?? '—'}</td>
-                    <td className={TABLE.td}>{tx.merchantName}</td>
-                    <td className={TABLE.td}>{formatCurrency(tx.amount)}</td>
-                    <td className={TABLE.td}>{tx.fraudScore}</td>
-                    <td className={TABLE.td}><RiskBadge level={tx.riskLevel} /></td>
-                    <td className={TABLE.td}><TxStatusBadge status={tx.status} /></td>
-                    <td className={TABLE.td}>{formatDate(tx.timestamp)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </BusyRegion>
+        <FlaggedTable items={flagged.items} loading={loading} onOpen={open} />
       )}
 
       {!error && <Pagination page={page} limit={flagged.pagination.limit} total={flagged.pagination.total} onChange={setPage} />}
@@ -159,73 +267,7 @@ export default function FlaggedTransactions() {
       <Modal open={viewingId !== null} title="Investigate transaction" onClose={close} wide dismissible={!creating}>
         {(flaggedDetailError || createError) && <div className="mb-4"><Alert tone="error">{flaggedDetailError || createError}</Alert></div>}
         {!t && !flaggedDetailError && <Spinner className="py-10" />}
-        {t && (
-          <div className="space-y-6">
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <DetailRow label="Transaction">{t.publicId}</DetailRow>
-              <DetailRow label="Amount">{formatCurrency(t.amount)}</DetailRow>
-              <DetailRow label="Date">{formatDate(t.timestamp)}</DetailRow>
-              <DetailRow label="Customer">{t.userId?.name} <span className="text-gray-500">({t.userId?.email})</span></DetailRow>
-              <DetailRow label="Customer trust score">{t.userId?.trustScore}</DetailRow>
-              <DetailRow label="Merchant">{t.merchantName} {t.merchantCategory && <span className="text-gray-500">· {t.merchantCategory}</span>}</DetailRow>
-              <DetailRow label="Payment method">{t.paymentMethod?.replace('_', ' ')}</DetailRow>
-              <DetailRow label="Location">{[t.location?.city, t.location?.country].filter(Boolean).join(', ') || '—'}</DetailRow>
-              <DetailRow label="IP address">{t.ipAddress}</DetailRow>
-              <DetailRow label="Status"><TxStatusBadge status={t.status} /></DetailRow>
-              <DetailRow label="Risk"><RiskBadge level={t.riskLevel} /></DetailRow>
-              <DetailRow label="Recommended action">{t.recommendedAction}</DetailRow>
-            </dl>
-
-            <div>
-              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
-              <ScoreBar value={t.fraudScore} label="Fraud score" />
-              {t.reasons?.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">{t.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
-            </div>
-
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Device</p>
-              <p className="text-sm text-gray-700">
-                <Link className="font-medium text-primary-600 hover:underline" to={`/analyst/device-reputation?deviceId=${encodeURIComponent(t.deviceId)}`}>{t.deviceId}</Link>
-              </p>
-              {dev ? (
-                <div className="mt-2 space-y-2">
-                  <ScoreBar value={dev.reputationScore} invert label="Device reputation" />
-                  <p className="text-xs text-gray-500">
-                    {dev.flagCount} flags · {dev.fraudTransactionCount} fraud transactions · {dev.isBlacklisted ? 'BLACKLISTED' : 'not blacklisted'} ·
-                    shared by {dev.associatedUserIds?.length ?? 0} customer(s)
-                  </p>
-                </div>
-              ) : <p className="mt-1 text-sm text-gray-500">No reputation record for this device.</p>}
-            </div>
-
-            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold text-gray-900">Investigation</p>
-                {ctx.fraudAlert && <AlertStatusBadge status={ctx.fraudAlert.status} />}
-              </div>
-              {ctx.existingCase ? (
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-gray-700">Case {ctx.existingCase.publicId}</span>
-                  <CaseStatusBadge status={ctx.existingCase.status} />
-                  {ctx.existingCase.assignedAnalystId?.name && <span className="text-xs text-gray-500">assigned to {ctx.existingCase.assignedAnalystId.name}</span>}
-                  <Link to={`/analyst/cases/${ctx.existingCase._id}`} className={`${BTN.base} ${BTN.primary} ${BTN.sm}`} onClick={close}>Open case</Link>
-                </div>
-              ) : ctx.fraudAlert ? (
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <label htmlFor="initial-note" className={INPUT.label}>Initial note (optional)</label>
-                    <textarea id="initial-note" rows={3} maxLength={2000} className={INPUT.base} value={note} onChange={(e) => setNote(e.target.value)} />
-                  </div>
-                  <button type="button" disabled={creating} className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={openCase}>
-                    {creating ? 'Opening…' : 'Open investigation case'}
-                  </button>
-                </div>
-              ) : (
-                <p className="mt-2 text-sm text-gray-500">This transaction has no fraud alert, so a case cannot be opened for it.</p>
-              )}
-            </div>
-          </div>
-        )}
+        {t && <InvestigationDetail ctx={ctx} t={t} dev={dev} note={note} onNote={setNote} creating={creating} onOpenCase={openCase} onClose={close} />}
       </Modal>
     </div>
   );

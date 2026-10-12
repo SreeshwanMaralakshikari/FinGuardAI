@@ -3,8 +3,10 @@
  * @description Top bar: mobile menu button, notification bell (not for ADMIN), user chip, sign-out.
  *   Static structural classes are inline (D-P7-03).
  *   F-04: the client always signs out locally (state is wiped, /login), but when the logout request
- *   itself failed the server cookie may still be valid until it expires — the toast says so
+ *   got NO answer the server cookie may still be valid until it expires — the toast says so
  *   instead of claiming a clean "Signed out".
+ *   E-01: logoutThunk is only rejected when there was no HTTP response; any answer (even 401/403 for
+ *   a deactivated or expired session) means the server ended the session, so "Signed out" is true.
  */
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -25,7 +27,7 @@ export default function Navbar({ onMenuClick }) {
 
   const onLogout = async () => {
     const action = await dispatch(logoutThunk());
-    if (logoutThunk.rejected.match(action)) {
+    if (logoutThunk.rejected.match(action)) { // no response from the server at all
       toast.error(LOGOUT_FAILED_MESSAGE, { duration: 8000 });
     } else {
       toast.success('Signed out');

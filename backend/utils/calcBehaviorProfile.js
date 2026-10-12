@@ -1,8 +1,10 @@
 /**
  * calcBehaviorProfile.js
  *
- * Recalculates and upserts the BehaviorProfile for a user after a LOW-risk
- * APPROVED transaction (C-P4-01, revised by AUD-37 and L-01).
+ * Recalculates and upserts the BehaviorProfile for a user. Called by
+ * services/transactionService.js after an APPROVED, LOW-risk transaction and by
+ * utils/caseWorkflow.js after an analyst dismisses a case and the payment is
+ * released (B-03). History: C-P4-01, revised by AUD-37 and L-01.
  *
  * AUD-37 / L-01: the profile is the customer's TRUSTED baseline, so it is built
  * from APPROVED, LOW-risk transactions only.
@@ -14,10 +16,9 @@
  *     stay out of the baseline, so every repeat is scored MEDIUM again.
  *
  * Purpose:
- *   Queries all of the user's APPROVED + LOW transactions (including the one
+ *   Queries the user's most recent trusted transactions (including the one
  *   just saved) to recompute behavioural statistics:
- *     • avgTransactionAmount  — arithmetic mean over ALL qualifying txns
- *                               (an all-time mean, not a rolling window)
+ *     • avgTransactionAmount  — arithmetic mean over the (up to 500) qualifying txns
  *     • maxTransactionAmount  — maximum single-transaction amount seen
  *     • usualLocations        — top-5 cities by frequency (case-insensitive;
  *                               the first-seen spelling is kept for display)
@@ -34,11 +35,17 @@
  *   not on findOneAndUpdate().  getHourInAppZone() always returns 0–23, so the
  *   constraint is naturally satisfied on this upsert path.
  *
+ * B-03: a HELD / BLOCKED payment that an analyst DISMISSED (released to APPROVED) carries
+ *   releasedByCaseAt and is trusted too — otherwise the same legitimate new city / device
+ *   was flagged again after the release. An APPROVED MEDIUM transaction never reviewed by an
+ *   analyst still does NOT train.
+ * C-07: only the most recent TRUSTED_HISTORY_LIMIT trusted transactions are read, so the
+ *   averages are a rolling window and the cost per submit is bounded.
+ *
  * Exported function:
- *   calcBehaviorProfile(userId, transaction) → Promise<BehaviorProfileDocument|null>
+ *   calcBehaviorProfile(userId) → Promise<BehaviorProfileDocument|null>
  *
  * @param {ObjectId|string}          userId      The customer's user ID
- * @param {import('mongoose').Document} transaction The saved TransactionModel document
  * @returns {Promise<import('mongoose').Document|null>} The upserted BehaviorProfile (null if nothing qualifies)
  */
 
@@ -51,25 +58,36 @@ import { normalizeCity } from './normalize.js';
 const topEntries = (counts, limit) =>
   [...counts.values()].sort((a, b) => b.count - a.count).slice(0, limit);
 
-const calcBehaviorProfile = async (userId, transaction) => {
+/** C-07: how many of the newest trusted transactions shape the baseline. */
+const TRUSTED_HISTORY_LIMIT = 500;
+
+const calcBehaviorProfile = async (userId) => {
   const now = new Date();
   const oneDayAgo  = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const oneHourAgo = new Date(now.getTime() -  1 * 60 * 60 * 1000);
 
   // The just-saved txn is already committed to the DB at this point (Phase 4
   // step order), so it is part of `trusted`.
-  const [trusted, perDayCount, perHourCount] = await Promise.all([
-    TransactionModel.find({ userId, status: 'APPROVED', riskLevel: 'LOW' })
+  const [newestFirst, perDayCount, perHourCount] = await Promise.all([
+    TransactionModel.find({
+      userId,
+      status: 'APPROVED',
+      $or: [{ riskLevel: 'LOW' }, { releasedByCaseAt: { $exists: true } }], // B-03
+    })
       .select('amount location paymentMethod deviceId timestamp')
-      .sort({ timestamp: 1 }) // oldest first: "first-seen spelling" of a city is deterministic (uses the userId+timestamp index)
+      .sort({ timestamp: -1, _id: -1 }) // newest first so the limit keeps the most recent (userId+timestamp index)
+      .limit(TRUSTED_HISTORY_LIMIT)
       .lean(),
 
     TransactionModel.countDocuments({ userId, timestamp: { $gte: oneDayAgo } }),
     TransactionModel.countDocuments({ userId, timestamp: { $gte: oneHourAgo } }),
   ]);
 
-  // Not reachable from CustomerAPI (it only calls this after saving an
-  // APPROVED + LOW transaction). Guard anyway so the maths below never divides by 0.
+  // Oldest first again: the "first-seen spelling" of a city stays deterministic.
+  const trusted = newestFirst.reverse();
+
+  // Normally not reachable (callers run it right after a trusted transaction exists), but a recalculation can find
+  // none, e.g. after the simulation cleanup removed them. Guard so the maths below never divides by 0.
   if (trusted.length === 0) return null;
 
   // One pass over the transactions: no Math.max(...array) spread, which throws

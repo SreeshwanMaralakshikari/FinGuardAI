@@ -5,8 +5,10 @@
  *   - Workflow (STATUS_TRANSITIONS mirrors the server, which enforces it and answers 400 otherwise;
  *     only the assigned analyst may change the status — 403 for anyone else):
  *       OPEN → (take the case) → ASSIGNED → UNDER_REVIEW → RESOLVED | DISMISSED
- *       ASSIGNED → DISMISSED is allowed too. DISMISSED = false positive: the alert is dismissed and the
- *       held / blocked transaction is released (APPROVED); the customer is notified of the outcome.
+ *       ASSIGNED → DISMISSED is allowed too.
+ *       B-02: RESOLVED = fraud confirmed (HELD → BLOCKED, alert REVIEWED); DISMISSED = false positive (alert
+ *       DISMISSED, held / blocked transaction released to APPROVED). The customer is notified either way
+ *       (text comes from the backend). The consequence is shown before choosing and in the dialog.
  *   - RESOLVED / DISMISSED require a resolutionSummary (max 5000) — AUD-07.
  *   - After a status change the case is refetched so resolvedAt / resolutionSummary are current.
  *   - Closed cases are read-only (the API rejects assign / status / notes with 400).
@@ -22,7 +24,7 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
 import {
   fetchCaseByIdThunk, assignCaseThunk, updateCaseStatusThunk, addCaseNoteThunk, clearSelectedCase,
 } from '../../store/slices/fraudCaseSlice.js';
-import { STATUS_TRANSITIONS } from '../../utils/constants.js';
+import { STATUS_TRANSITIONS, CASE_OUTCOME } from '../../utils/constants.js';
 import { BTN, CARD, INPUT, formatCurrency, formatDate } from '../../utils/common.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Spinner from '../../components/common/Spinner.jsx';
@@ -31,11 +33,197 @@ import LoadError from '../../components/common/LoadError.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
+import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
 import { RiskBadge, CaseStatusBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 
 const CLOSING = ['RESOLVED', 'DISMISSED'];
 const ACTION_LABEL = { UNDER_REVIEW: 'Start review', RESOLVED: 'Resolve', DISMISSED: 'Dismiss' };
+// B-02: what each choice does to the payment, shown BEFORE the analyst chooses (and in the dialog).
+const ACTION_HELP = {
+  UNDER_REVIEW: 'Start investigating. The payment stays as it is.',
+  RESOLVED:     'Resolve = fraud confirmed: a held payment is BLOCKED and stays blocked.',
+  DISMISSED:    'Dismiss = false positive: a held or blocked payment is RELEASED (approved).',
+};
+const CONSEQUENCE = {
+  RESOLVED:  'Fraud confirmed - payment blocked. A held transaction becomes BLOCKED, the alert is marked REVIEWED and the customer is notified.',
+  DISMISSED: 'False positive - payment released. A held or blocked transaction becomes APPROVED again, the alert is marked DISMISSED and the customer is notified.',
+};
+
+
+// ─── Presentational pieces (H-06: split out of CaseDetail — props in, JSX out) ──────────────
+
+function CaseSummary({ c }) {
+  return (
+    <section className={`${CARD.base} ${CARD.body}`} aria-label="Case summary">
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <DetailRow label="Status">
+          <CaseStatusBadge status={c.status} />
+          {CASE_OUTCOME[c.status] && <span className="mt-1 block text-xs text-gray-600">{CASE_OUTCOME[c.status]}</span>}
+        </DetailRow>
+        <DetailRow label="Assigned to">{c.assignedAnalystId?.name ?? 'Unassigned'}</DetailRow>
+        <DetailRow label="Opened">{formatDate(c.openedAt)}</DetailRow>
+        <DetailRow label="Closed">{c.resolvedAt ? formatDate(c.resolvedAt) : '—'}</DetailRow>
+      </dl>
+      {c.resolutionSummary && (
+        <div className="mt-4 rounded-lg bg-gray-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Resolution summary</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">{c.resolutionSummary}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CaseTransaction({ tx }) {
+  return (
+    <section className={`${CARD.base} ${CARD.body}`} aria-label="Transaction">
+      <h2 className="mb-4 text-base font-semibold text-gray-900">Transaction</h2>
+      <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <DetailRow label="ID">{tx.publicId}</DetailRow>
+        <DetailRow label="Amount">{formatCurrency(tx.amount)}</DetailRow>
+        <DetailRow label="Merchant">{tx.merchantName}</DetailRow>
+        <DetailRow label="Date">{formatDate(tx.timestamp)}</DetailRow>
+        <DetailRow label="Risk"><RiskBadge level={tx.riskLevel} /></DetailRow>
+        <DetailRow label="Status"><TxStatusBadge status={tx.status} /></DetailRow>
+        <DetailRow label="IP">{tx.ipAddress}</DetailRow>
+        <DetailRow label="Device">
+          {tx.deviceId ? <Link className="text-primary-600 hover:underline" to={`/analyst/device-reputation?deviceId=${encodeURIComponent(tx.deviceId)}`}>{tx.deviceId}</Link> : '—'}
+        </DetailRow>
+      </dl>
+      <div className="mt-4">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
+        <ScoreBar value={tx.fraudScore} riskLevel={tx.riskLevel} label="Fraud score" />
+      </div>
+      {tx.scoreBreakdown?.length > 0 && (
+        <div className="mt-4"><ScoreBreakdown breakdown={tx.scoreBreakdown} fraudScore={tx.fraudScore} /></div>
+      )}
+    </section>
+  );
+}
+
+function CaseAlertReasons({ alert }) {
+  return (
+    <section className={`${CARD.base} ${CARD.body}`} aria-label="Alert reasons">
+      <h2 className="mb-3 text-base font-semibold text-gray-900">Why it was flagged</h2>
+      <p className="mb-2 text-xs text-gray-500">{alert.alertType?.replaceAll('_', ' ')}</p>
+      <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">{alert.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
+    </section>
+  );
+}
+
+function CaseNotes({ notes, closed, noteForm, onAddNote }) {
+  return (
+    <section className={`${CARD.base} ${CARD.body}`} aria-labelledby="notes-title">
+      <h2 id="notes-title" className="mb-4 text-base font-semibold text-gray-900">Investigation notes</h2>
+      {notes.length === 0 ? (
+        <p className="text-sm text-gray-500">No notes yet.</p>
+      ) : (
+        <ul className="space-y-3">
+          {notes.map((n, i) => (
+            <li key={n._id ?? `${n.createdAt}-${i}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="whitespace-pre-wrap text-sm text-gray-800">{n.text}</p>
+              <p className="mt-1 text-xs text-gray-500">{n.analystId?.name ?? 'Analyst'} · {formatDate(n.createdAt)}</p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {!closed && (
+        <form onSubmit={noteForm.handleSubmit(onAddNote)} noValidate className="mt-4 space-y-2">
+          <label htmlFor="noteText" className={INPUT.label}>Add a note</label>
+          <textarea
+            id="noteText"
+            rows={3}
+            className={`${INPUT.base} ${noteForm.formState.errors.noteText ? INPUT.error : ''}`}
+            {...noteForm.register('noteText', {
+              required: 'Write something first',
+              maxLength: { value: 2000, message: 'A note cannot exceed 2000 characters' },
+              validate: (v) => v.trim().length > 0 || 'Write something first',
+            })}
+          />
+          {noteForm.formState.errors.noteText && <p className={INPUT.errMsg} role="alert">{noteForm.formState.errors.noteText.message}</p>}
+          <button type="submit" disabled={noteForm.formState.isSubmitting} className={`${BTN.base} ${BTN.primary} ${BTN.sm}`}>
+            {noteForm.formState.isSubmitting ? 'Adding…' : 'Add note'}
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function CaseActions({ c, closed, assignedToMe, nextStatuses, busy, onAssign, onStatus }) {
+  return (
+    <section className={`${CARD.base} ${CARD.body}`} aria-label="Actions">
+      <h2 className="mb-3 text-base font-semibold text-gray-900">Actions</h2>
+      {closed ? (
+        <p className="text-sm text-gray-500">This case is closed and read-only.</p>
+      ) : (
+        <div className="space-y-3">
+          {!assignedToMe && (
+            <button type="button" disabled={busy} className={`${BTN.base} ${BTN.primary} ${BTN.md} w-full`} onClick={onAssign}>
+              {c.assignedAnalystId ? 'Take over this case' : 'Assign to me'}
+            </button>
+          )}
+          {c.status === 'OPEN' && <p className="text-xs text-gray-500">Assign the case to yourself to start working on it.</p>}
+          {nextStatuses.map((s) => (
+            <button
+              key={s}
+              type="button"
+              disabled={busy || !assignedToMe}
+              className={`${BTN.base} ${s === 'DISMISSED' ? BTN.secondary : BTN.primary} ${BTN.md} w-full`}
+              onClick={() => onStatus(s)}
+            >
+              {ACTION_LABEL[s]}
+            </button>
+          ))}
+          {nextStatuses.length > 0 && (
+            <ul className="space-y-1 text-xs text-gray-600" aria-label="What each action does">
+              {nextStatuses.map((s) => <li key={s}>{ACTION_HELP[s]}</li>)}
+            </ul>
+          )}
+          {nextStatuses.length > 0 && !assignedToMe && (
+            <p className="text-xs text-gray-500">Only the assigned analyst can change the status.</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CloseCaseModal({ closing, busy, closeError, summary, summaryError, onSummary, onCancel, onConfirm }) {
+  return (
+    <Modal
+      open={closing !== null}
+      title={closing === 'RESOLVED' ? 'Resolve case' : 'Dismiss case'}
+      onClose={onCancel}
+      dismissible={!busy}
+      footer={(
+        <>
+          <button type="button" disabled={busy} className={`${BTN.base} ${BTN.secondary} ${BTN.md}`} onClick={onCancel}>Cancel</button>
+          <button type="button" disabled={busy} className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={onConfirm}>
+            {closing === 'RESOLVED' ? 'Resolve case' : 'Dismiss case'}
+          </button>
+        </>
+      )}
+    >
+      {closeError && <div className="mb-3"><Alert tone="error">{closeError}</Alert></div>}
+      {CONSEQUENCE[closing] && <div className="mb-3"><Alert tone="warning">{CONSEQUENCE[closing]} This cannot be undone.</Alert></div>}
+      <label htmlFor="resolutionSummary" className={INPUT.label}>Resolution summary (required)</label>
+      <textarea
+        id="resolutionSummary"
+        rows={5}
+        maxLength={5000}
+        className={`${INPUT.base} ${summaryError ? INPUT.error : ''}`}
+        value={summary}
+        onChange={(e) => onSummary(e.target.value)}
+        placeholder="What did you find, and why is the case being closed?"
+      />
+      <p className="mt-1 text-xs text-gray-500">{summary.length}/5000</p>
+      {summaryError && <p className={INPUT.errMsg} role="alert">{summaryError}</p>}
+    </Modal>
+  );
+}
 
 export default function CaseDetail() {
   const { id } = useParams();
@@ -152,154 +340,34 @@ export default function CaseDetail() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <div className="space-y-6 xl:col-span-2">
-          <section className={`${CARD.base} ${CARD.body}`} aria-label="Case summary">
-            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <DetailRow label="Status"><CaseStatusBadge status={c.status} /></DetailRow>
-              <DetailRow label="Assigned to">{c.assignedAnalystId?.name ?? 'Unassigned'}</DetailRow>
-              <DetailRow label="Opened">{formatDate(c.openedAt)}</DetailRow>
-              <DetailRow label="Closed">{c.resolvedAt ? formatDate(c.resolvedAt) : '—'}</DetailRow>
-            </dl>
-            {c.resolutionSummary && (
-              <div className="mt-4 rounded-lg bg-gray-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Resolution summary</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">{c.resolutionSummary}</p>
-              </div>
-            )}
-          </section>
+          <CaseSummary c={c} />
 
           {tx && (
-            <section className={`${CARD.base} ${CARD.body}`} aria-label="Transaction">
-              <h2 className="mb-4 text-base font-semibold text-gray-900">Transaction</h2>
-              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <DetailRow label="ID">{tx.publicId}</DetailRow>
-                <DetailRow label="Amount">{formatCurrency(tx.amount)}</DetailRow>
-                <DetailRow label="Merchant">{tx.merchantName}</DetailRow>
-                <DetailRow label="Date">{formatDate(tx.timestamp)}</DetailRow>
-                <DetailRow label="Risk"><RiskBadge level={tx.riskLevel} /></DetailRow>
-                <DetailRow label="Status"><TxStatusBadge status={tx.status} /></DetailRow>
-                <DetailRow label="IP">{tx.ipAddress}</DetailRow>
-                <DetailRow label="Device">
-                  {tx.deviceId ? <Link className="text-primary-600 hover:underline" to={`/analyst/device-reputation?deviceId=${encodeURIComponent(tx.deviceId)}`}>{tx.deviceId}</Link> : '—'}
-                </DetailRow>
-              </dl>
-              <div className="mt-4">
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
-                <ScoreBar value={tx.fraudScore} label="Fraud score" />
-              </div>
-            </section>
+            <CaseTransaction tx={tx} />
           )}
 
           {alert?.reasons?.length > 0 && (
-            <section className={`${CARD.base} ${CARD.body}`} aria-label="Alert reasons">
-              <h2 className="mb-3 text-base font-semibold text-gray-900">Why it was flagged</h2>
-              <p className="mb-2 text-xs text-gray-500">{alert.alertType?.replaceAll('_', ' ')}</p>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-gray-700">{alert.reasons.map((r) => <li key={r}>{r}</li>)}</ul>
-            </section>
+            <CaseAlertReasons alert={alert} />
           )}
 
-          <section className={`${CARD.base} ${CARD.body}`} aria-labelledby="notes-title">
-            <h2 id="notes-title" className="mb-4 text-base font-semibold text-gray-900">Investigation notes</h2>
-            {(c.notes ?? []).length === 0 ? (
-              <p className="text-sm text-gray-500">No notes yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {c.notes.map((n, i) => (
-                  <li key={n._id ?? `${n.createdAt}-${i}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-                    <p className="whitespace-pre-wrap text-sm text-gray-800">{n.text}</p>
-                    <p className="mt-1 text-xs text-gray-500">{n.analystId?.name ?? 'Analyst'} · {formatDate(n.createdAt)}</p>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {!closed && (
-              <form onSubmit={noteForm.handleSubmit(onAddNote)} noValidate className="mt-4 space-y-2">
-                <label htmlFor="noteText" className={INPUT.label}>Add a note</label>
-                <textarea
-                  id="noteText"
-                  rows={3}
-                  className={`${INPUT.base} ${noteForm.formState.errors.noteText ? INPUT.error : ''}`}
-                  {...noteForm.register('noteText', {
-                    required: 'Write something first',
-                    maxLength: { value: 2000, message: 'A note cannot exceed 2000 characters' },
-                    validate: (v) => v.trim().length > 0 || 'Write something first',
-                  })}
-                />
-                {noteForm.formState.errors.noteText && <p className={INPUT.errMsg} role="alert">{noteForm.formState.errors.noteText.message}</p>}
-                <button type="submit" disabled={noteForm.formState.isSubmitting} className={`${BTN.base} ${BTN.primary} ${BTN.sm}`}>
-                  {noteForm.formState.isSubmitting ? 'Adding…' : 'Add note'}
-                </button>
-              </form>
-            )}
-          </section>
+          <CaseNotes notes={c.notes ?? []} closed={closed} noteForm={noteForm} onAddNote={onAddNote} />
         </div>
 
         <aside className="space-y-6">
-          <section className={`${CARD.base} ${CARD.body}`} aria-label="Actions">
-            <h2 className="mb-3 text-base font-semibold text-gray-900">Actions</h2>
-            {closed ? (
-              <p className="text-sm text-gray-500">This case is closed and read-only.</p>
-            ) : (
-              <div className="space-y-3">
-                {!assignedToMe && (
-                  <button type="button" disabled={busy} className={`${BTN.base} ${BTN.primary} ${BTN.md} w-full`} onClick={onAssign}>
-                    {c.assignedAnalystId ? 'Take over this case' : 'Assign to me'}
-                  </button>
-                )}
-                {c.status === 'OPEN' && <p className="text-xs text-gray-500">Assign the case to yourself to start working on it.</p>}
-                {nextStatuses.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    disabled={busy || !assignedToMe}
-                    className={`${BTN.base} ${s === 'DISMISSED' ? BTN.secondary : BTN.primary} ${BTN.md} w-full`}
-                    onClick={() => onStatus(s)}
-                  >
-                    {ACTION_LABEL[s]}
-                  </button>
-                ))}
-                {nextStatuses.length > 0 && !assignedToMe && (
-                  <p className="text-xs text-gray-500">Only the assigned analyst can change the status.</p>
-                )}
-              </div>
-            )}
-          </section>
+          <CaseActions c={c} closed={closed} assignedToMe={assignedToMe} nextStatuses={nextStatuses} busy={busy} onAssign={onAssign} onStatus={onStatus} />
         </aside>
       </div>
 
-      <Modal
-        open={closing !== null}
-        title={closing === 'RESOLVED' ? 'Resolve case' : 'Dismiss case'}
-        onClose={() => setClosing(null)}
-        dismissible={!busy}
-        footer={(
-          <>
-            <button type="button" disabled={busy} className={`${BTN.base} ${BTN.secondary} ${BTN.md}`} onClick={() => setClosing(null)}>Cancel</button>
-            <button type="button" disabled={busy} className={`${BTN.base} ${BTN.primary} ${BTN.md}`} onClick={confirmClose}>
-              {closing === 'RESOLVED' ? 'Resolve case' : 'Dismiss case'}
-            </button>
-          </>
-        )}
-      >
-        {closeError && <div className="mb-3"><Alert tone="error">{closeError}</Alert></div>}
-        <p className="mb-3 text-xs text-gray-500">
-          {closing === 'DISMISSED'
-            ? 'Dismissing marks the alert as a false positive: the transaction is released (approved) and the customer is notified.'
-            : 'Resolving closes the case; the customer is notified of the outcome.'}
-        </p>
-        <label htmlFor="resolutionSummary" className={INPUT.label}>Resolution summary (required)</label>
-        <textarea
-          id="resolutionSummary"
-          rows={5}
-          maxLength={5000}
-          className={`${INPUT.base} ${summaryError ? INPUT.error : ''}`}
-          value={summary}
-          onChange={(e) => setSummary(e.target.value)}
-          placeholder="What did you find, and why is the case being closed?"
-        />
-        <p className="mt-1 text-xs text-gray-500">{summary.length}/5000</p>
-        {summaryError && <p className={INPUT.errMsg} role="alert">{summaryError}</p>}
-      </Modal>
+      <CloseCaseModal
+        closing={closing}
+        busy={busy}
+        closeError={closeError}
+        summary={summary}
+        summaryError={summaryError}
+        onSummary={setSummary}
+        onCancel={() => setClosing(null)}
+        onConfirm={confirmClose}
+      />
     </div>
   );
 }

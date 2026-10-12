@@ -31,9 +31,11 @@ const BASE_BEHAVIOR = {
 const run = (o = {}) => checkFraud({ transaction: SAFE_TXN, behaviorProfile: BASE_BEHAVIOR, deviceReputation: null, thresholds: BASE_THRESHOLDS, ...o });
 
 describe('checkFraud — result shape', () => {
-  it('returns { fraudScore, riskLevel, reasons[], recommendedAction, estimatedLoss, signals[] }', () => {
+  it('returns { fraudScore, riskLevel, reasons[], recommendedAction, estimatedLoss, signals[], breakdown[], rawScore }', () => {
     const r = run();
-    expect(r).toEqual({ fraudScore: 0, riskLevel: 'LOW', reasons: [], recommendedAction: 'APPROVE', estimatedLoss: 0, signals: [] });
+    expect(r).toMatchObject({ fraudScore: 0, riskLevel: 'LOW', reasons: [], recommendedAction: 'APPROVE', estimatedLoss: 0, signals: [], rawScore: 0 });
+    expect(Object.keys(r).sort()).toEqual(['breakdown', 'estimatedLoss', 'fraudScore', 'rawScore', 'reasons', 'recommendedAction', 'riskLevel', 'signals']);
+    expect(r.breakdown).toHaveLength(6);
   });
 });
 

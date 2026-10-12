@@ -10,12 +10,25 @@
  * @phase Phase 6 support — Phase 1–9 audit (round 2)
  */
 
+export const UNREACHABLE_MESSAGE = 'Cannot reach the server - check your connection and try again.';
+
+/**
+ * F-03: no HTTP response at all = timeout, offline, DNS or CORS failure. Cancellations (a logout
+ * aborting in-flight requests) and non-network exceptions keep the caller's own fallback text.
+ */
+function isUnreachable(err) {
+  if (!err || typeof err !== 'object' || err.response) return false;
+  if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') return false;
+  return Boolean(err.isAxiosError || err.request || err.message === 'Network Error');
+}
+
 /**
  * @param {unknown} err       error thrown by the axios instance
  * @param {string}  fallback  message when the server gave none (network error, timeout)
  * @returns {string}
  */
 export function getErrorMessage(err, fallback) {
+  if (isUnreachable(err)) return UNREACHABLE_MESSAGE; // F-03
   const body = err?.response?.data;
   // FE-fix: a model-level 422 carries BOTH a generic message ('Validation failed.')
   // and the specific errors[]; show the specific one first. Validator 422s now also carry

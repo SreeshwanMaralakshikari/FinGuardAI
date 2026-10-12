@@ -4,8 +4,8 @@
  *   per IST day, zero-filled, from IST midnight 30 days ago through today (31 days, AUD-26) —
  *   plotted directly. peakFraudHours (top 5, IST) is computed over the SAME window (N-14).
  *   N-02: a failed load shows the error + Retry instead of an all-zero chart.
- *   The phase-1 "predictions" requirement is met by the 7-day moving average (no forecasting
- *   model exists in the backend).
+ *   A-04: `forecast` (least-squares, next 7 IST days) is drawn as a dashed continuation by TrendChart,
+ *   with a note when the server says it is not available. The moving average stays as it was.
  */
 import { useCallback, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
@@ -50,7 +50,7 @@ export default function AdminTrends() {
         <StatCard label="Amount at risk" value={formatCurrency(amount)} hint="Last 30 days plus today (IST)" />
         <StatCard label="Current 7-day average" value={`${latestAvg}/day`} />
       </div>
-      <div className="mt-6"><TrendChart data={days} /></div>
+      <div className="mt-6"><TrendChart data={days} forecast={lossStats.forecast ?? null} /></div>
       <section className={`${CARD.base} mt-6 p-5`} aria-labelledby="peak-hours">
         <h2 id="peak-hours" className="text-sm font-semibold text-gray-900">Peak fraud hours (IST)</h2>
         <p className="mt-0.5 text-xs text-gray-500">Top 5 hours of the day, counted over the same period as the chart.</p>

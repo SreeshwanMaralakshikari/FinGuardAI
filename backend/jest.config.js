@@ -1,4 +1,4 @@
-// jest.config.js  (finguardai-backend/)
+// jest.config.js  (backend/)
 // Native ES Modules: run with `node --experimental-vm-modules` (see package.json "test" script).
 export default {
   testEnvironment: 'node',

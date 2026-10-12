@@ -73,7 +73,7 @@ function ClusterList({ title, hint, clusters, keyField, renderKey }) {
 
 export default function FraudPatterns() {
   const { data, loading, error, reload } = useFetch(
-    async () => (await api.get(API_PATHS.ANALYST.FRAUD_PATTERNS)).data.data,
+    async (signal) => (await api.get(API_PATHS.ANALYST.FRAUD_PATTERNS, { signal })).data.data,
     [],
   );
 

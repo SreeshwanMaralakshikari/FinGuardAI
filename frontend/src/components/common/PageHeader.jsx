@@ -3,8 +3,10 @@
  * @description Page heading. Also keeps `document.title` in step with the page
  *   ("Transactions · FinGuardAI") so browser tabs, history and screen readers
  *   announce where the user is after a client-side navigation.
+ *   F-05: the first PageHeader that mounts after a route change moves focus to its <h1>.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { consumeRouteFocus } from '../../utils/routeFocus.js';
 
 const APP_TITLE = 'FinGuardAI';
 
@@ -16,10 +18,15 @@ export default function PageHeader({ title, subtitle = null, actions = null }) {
     return () => { document.title = previous; };
   }, [title]);
 
+  const headingRef = useRef(null);
+  useEffect(() => {
+    if (consumeRouteFocus()) headingRef.current?.focus({ preventScroll: true });
+  }, []);
+
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        <h1 className="break-words text-2xl font-bold text-gray-900">{title}</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="break-words text-2xl font-bold text-gray-900 focus:outline-none">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-gray-500">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 export const userRoom = (userId) => String(userId);
 export const roleRoom = (role) => `role:${role}`;
 
-export const ADMIN_ONLY_EVENTS = Object.freeze(
+const ADMIN_ONLY_EVENTS = Object.freeze(
   new Set(['fraud_alert', 'simulation_start', 'simulation_stop'])
 );
 

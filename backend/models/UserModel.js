@@ -1,7 +1,17 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { ROLES } from '../utils/enums.js';
 
 const { Schema } = mongoose;
+
+/** D-04: removes fields that must never leave the server from toJSON() / toObject() output. */
+function stripInternalFields(doc, ret) {
+  delete ret.password;
+  delete ret.passwordChangedAt;
+  delete ret.sessionsRevokedAt;
+  delete ret.__v;
+  return ret;
+}
 
 const userSchema = new Schema(
   {
@@ -29,7 +39,7 @@ const userSchema = new Schema(
     role: {
       type: String,
       enum: {
-        values: ['CUSTOMER', 'ANALYST', 'ADMIN'],
+        values: [...ROLES],
         message: 'Role must be CUSTOMER, ANALYST, or ADMIN',
       },
       required: [true, 'Role is required'],
@@ -55,14 +65,27 @@ const userSchema = new Schema(
       type: Date,             // AUD-23: JWTs issued before this are rejected (verifyToken, socketAuth)
       select: false,          // internal — never returned in API responses
     },
+    isSimulated: {
+      type: Boolean,
+      default: false,         // A-08: true only for the synthetic customers of the admin simulation generator (cleanup filters on it)
+    },
+    sessionsRevokedAt: {
+      type: Date,             // C-09: set when an admin deactivates the account; JWTs issued at or before
+      select: false,          // this instant stay invalid after re-activation (verifyToken.isTokenRevoked)
+    },
   },
   {
     timestamps: true,         // injects createdAt, updatedAt
+    // D-04: defence in depth — even a document that was loaded with +password (or a future
+    // create()/save() result) can never serialise the hash or internal revocation timestamps.
+    toJSON: { transform: stripInternalFields },
+    toObject: { transform: stripInternalFields },
   }
 );
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
-userSchema.index({ email: 1, role: 1 });
+// C-05: {email, role} was dropped (no query uses it; the unique email index serves login). The admin users list sorts on createdAt.
+userSchema.index({ createdAt: -1 });
 
 // ── Pre-save hook: bcrypt password hashing ────────────────────────────────────
 // Mongoose 9 middleware is promise-based: hooks do NOT receive a `next`

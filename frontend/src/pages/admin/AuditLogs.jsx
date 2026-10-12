@@ -15,11 +15,12 @@ import { useFetch } from '../../hooks/useFetch.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Pagination from '../../components/common/Pagination.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
-import Spinner from '../../components/common/Spinner.jsx';
+import TableSkeleton from '../../components/common/TableSkeleton.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import BusyRegion from '../../components/common/BusyRegion.jsx';
 
-const ENTITY_TYPES = ['User', 'Transaction', 'FraudAlert', 'FraudCase', 'SystemConfig'];
+// every entityType the backend writes (createAuditLog calls): users, payments, alerts, cases, config/simulation, devices
+const ENTITY_TYPES = ['User', 'Transaction', 'FraudAlert', 'FraudCase', 'SystemConfig', 'Device'];
 
 // Look-up of complete class sets by keyword in the action name
 const colorFor = (action = '') => {
@@ -37,11 +38,11 @@ export default function AuditLogs() {
   const [page, setPage] = useState(1);
   const [openRow, setOpenRow] = useState(null);
 
-  const { data, loading, error, reload } = useFetch(async () => {
+  const { data, loading, error, reload } = useFetch(async (signal) => {
     const params = { page, limit: PAGINATION.DEFAULT_LIMIT_ADMIN, ...dateRangeParams(filters.startDate, filters.endDate) };
     if (filters.actorRole) params.actorRole = filters.actorRole;
     if (filters.entityType) params.entityType = filters.entityType;
-    const res = await api.get(API_PATHS.ADMIN.AUDIT_LOGS, { params });
+    const res = await api.get(API_PATHS.ADMIN.AUDIT_LOGS, { params, signal });
     return { logs: res.data.data, pagination: res.data.pagination };
   }, [page, filters]);
 
@@ -81,14 +82,14 @@ export default function AuditLogs() {
 
       {error ? (
         <LoadError message={error} onRetry={reload} />
-      ) : loading && !data ? <Spinner /> : logs.length === 0 ? (
+      ) : loading && !data ? <TableSkeleton cols={6} /> : logs.length === 0 ? (
         <EmptyState title="No audit entries" message="Nothing matches these filters." />
       ) : (
         <BusyRegion busy={loading}>
           <div className={TABLE.wrapper}>
             <table className={TABLE.table}>
               <thead className={TABLE.thead}>
-                <tr>{['Time', 'Actor', 'Action', 'Entity', 'IP', ''].map((h) => <th key={h || 'a'} className={TABLE.th}>{h}</th>)}</tr>
+                <tr>{['Time', 'Actor', 'Action', 'Entity', 'IP', ''].map((h) => <th key={h || 'a'} className={TABLE.th}>{h || <span className="sr-only">Actions</span>}</th>)}</tr>
               </thead>
               <tbody className={TABLE.tbody}>
                 {logs.map((l) => (

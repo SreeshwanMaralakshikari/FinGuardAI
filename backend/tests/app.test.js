@@ -4,7 +4,7 @@ import supertest from 'supertest';
 import { readFileSync } from 'node:fs';
 import app from '../app.js';
 import { connectTestDB, disconnectTestDB } from './setup.js';
-import { seedUser } from './helpers/seedUser.js';
+import { seedUser, uniqueEmail } from './helpers/seedUser.js';
 import { createAgent } from './helpers/authAgent.js';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -35,7 +35,7 @@ describe('D-11 root and health', () => {
 
 describe('body-less requests', () => {
   it('PATCH /customer-api/profile with no body is a 400, not a 500', async () => {
-    const { user, password } = await seedUser({ email: `nobody${Date.now()}@test.com` });
+    const { user, password } = await seedUser({ email: uniqueEmail('nobody') });
     const agent = createAgent();
     expect((await agent.post('/auth/login').send({ email: user.email, password })).status).toBe(200);
     const res = await agent.patch('/customer-api/profile');

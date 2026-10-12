@@ -6,16 +6,23 @@
  *   - Calls toast() to show a visible alert in the corner
  *   - Disconnects on unmount
  *   - ADMIN is excluded per Phase 4 D-P4-09
+ *   - F-01: on the 2nd and later 'connect' (Render restart, network blip) the unread badge — and the
+ *     list, when the panel is open — are refetched, because pushes were missed while offline.
+ *     An auth rejection (expired JWT) stops the reconnect loop and re-runs the session check.
+ *   - F-04: socket.io-client is imported lazily (api/socketClient.js).
  * @phase Phase 6 (original) → Phase 9 (SOCKET_URL + connect_error) [P9]
  * @decision D-P6-06, Phase 4 D-P4-09
  */
 
 import { useEffect } from 'react';
-import { io } from 'socket.io-client';
+import { useStore } from 'react-redux';
 import toast from 'react-hot-toast';
 import { useAppDispatch, useAppSelector } from '../store/hooks.js';
-import { SOCKET_URL } from '../api/apiConfig.js';
-import { addLiveNotification } from '../store/slices/notificationSlice.js';
+import { openSocket, isSocketAuthError, handleSocketAuthError } from '../api/socketClient.js';
+import {
+  addLiveNotification, fetchUnreadCountThunk, fetchNotificationsThunk,
+} from '../store/slices/notificationSlice.js';
+import { PAGINATION } from '../utils/constants.js';
 
 /**
  * Subscribe to real-time notifications for CUSTOMER or ANALYST.
@@ -23,38 +30,59 @@ import { addLiveNotification } from '../store/slices/notificationSlice.js';
  */
 export function useNotifications() {
   const dispatch = useAppDispatch();
+  const store = useStore();
   const { user, isAuthenticated } = useAppSelector((s) => s.auth);
 
   useEffect(() => {
     // ADMIN is excluded from notifications (Phase 4 D-P4-09)
-    if (!isAuthenticated || !user?.id || user?.role === 'ADMIN') return;
+    if (!isAuthenticated || !user?.id || user?.role === 'ADMIN') return undefined;
 
-    const socket = io(SOCKET_URL, {
-      withCredentials: true,
-      transports: ['websocket'],
-    });
+    let cancelled = false;
+    let socket = null;
+    let connects = 0;
 
-    socket.on('connect', () => {
-      // Kept for compatibility — the server already joined this room on connect
-      socket.emit('join', user.id.toString());
-    });
+    openSocket().then((s) => {
+      if (cancelled) { s.disconnect(); return; }
+      socket = s;
 
-    // [P9] Server middleware rejects handshakes without a valid cookie
-    socket.on('connect_error', (err) => {
-      if (import.meta.env.DEV) console.warn('[socket] connect_error:', err.message);
-    });
-
-    socket.on('new-notification', (payload) => {
-      dispatch(addLiveNotification(payload));
-
-      const message = payload?.message ?? 'You have a new notification';
-      toast(message, {
-        icon: payload?.type === 'FRAUD_ALERT' ? '🚨' : '🔔',
+      s.on('connect', () => {
+        connects += 1;
+        // Kept for compatibility — the server already joined this room on connect
+        s.emit('join', user.id.toString());
+        if (connects > 1) {
+          // F-01: reconnected — whatever was pushed meanwhile was missed
+          dispatch(fetchUnreadCountThunk());
+          if (store.getState().notifications?.panelOpen) {
+            dispatch(fetchNotificationsThunk({ limit: PAGINATION.DEFAULT_LIMIT_CASES }));
+          }
+        }
       });
+
+      // [P9] Server middleware rejects handshakes without a valid cookie
+      s.on('connect_error', (err) => {
+        if (isSocketAuthError(err)) { // F-01: session over — stop retrying
+          handleSocketAuthError(s, dispatch);
+          return;
+        }
+        if (import.meta.env.DEV) console.warn('[socket] connect_error:', err.message);
+      });
+
+      s.on('new-notification', (payload) => {
+        dispatch(addLiveNotification(payload));
+
+        const message = payload?.message ?? 'You have a new notification';
+        toast(message, {
+          icon: payload?.type === 'FRAUD_ALERT' ? '🚨' : '🔔',
+        });
+      });
+    }).catch((err) => {
+      // The chunk could not be loaded (offline): live updates are unavailable, the REST pages still work
+      if (import.meta.env.DEV) console.warn('[socket] could not load socket.io-client:', err?.message);
     });
 
     return () => {
-      socket.disconnect();
+      cancelled = true;
+      socket?.disconnect();
     };
-  }, [isAuthenticated, user?.id, user?.role, dispatch]);
+  }, [isAuthenticated, user?.id, user?.role, dispatch, store]);
 }

@@ -55,7 +55,7 @@ export const socketAuthMiddleware = async (socket, next) => {
     if (!token) return next(new Error('UNAUTHENTICATED'));
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await UserModel.findById(decoded.id).select('_id role isActive +passwordChangedAt').lean();
+    const user = await UserModel.findById(decoded.id).select('_id role isActive +passwordChangedAt +sessionsRevokedAt').lean();
 
     if (!user || !user.isActive || isTokenRevoked(user, decoded)) return next(new Error('UNAUTHENTICATED')); // AUD-23
 

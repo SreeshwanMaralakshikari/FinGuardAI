@@ -2,7 +2,7 @@
 import { beforeAll, afterAll, beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { itAtomic } from './helpers/dbAtomicity.js';
 import { connectTestDB, disconnectTestDB, clearCollections } from './setup.js';
-import { seedUser, seedAnalyst, seedAdmin } from './helpers/seedUser.js';
+import { seedUser, seedAnalyst, seedAdmin, uniqueEmail } from './helpers/seedUser.js';
 import { seedTransaction } from './helpers/seedTransaction.js';
 import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
@@ -12,18 +12,19 @@ import NotificationModel from '../models/NotificationModel.js';
 import UserModel from '../models/UserModel.js';
 import { seedConfig } from './helpers/seedConfig.js';
 import { loginAgent } from './helpers/authAgent.js';
+import { createWithSequentialId } from '../utils/generateSequentialId.js';
 
 beforeAll(connectTestDB);
 afterAll(disconnectTestDB);
 beforeEach(async () => { await clearCollections(); await seedConfig(); });
 
-const highRisk = { amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'CARD', deviceId: 'dev-x' };
+const highRisk = { amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'CARD', deviceId: 'dev-x', location: { city: 'Mumbai', country: 'IN' } };
 
 async function setup() {
-  const c = await seedUser({ email: `cust${Date.now()}@test.com` });
+  const c = await seedUser({ email: uniqueEmail('cust') });
   const customer = await loginAgent(c.user.email, c.password);
   await customer.post('/customer-api/transactions').send(highRisk);
-  const a = await seedAnalyst({ email: `an${Date.now()}@test.com` });
+  const a = await seedAnalyst({ email: uniqueEmail('an') });
   const analyst = await loginAgent(a.user.email, a.password);
   const flagged = await analyst.get('/analyst-api/flagged-transactions');
   const detail = await analyst.get(`/analyst-api/flagged-transactions/${flagged.body.data[0]._id}`);
@@ -80,7 +81,7 @@ describe('Case lifecycle', () => {
     expect(full.body.data.fraudAlertId.status).toBe('REVIEWED');
 
     const unread = await analyst.get('/notification-api/notifications/unread-count');
-    expect(unread.body.data.unreadCount).toBe(1); // CASE_ASSIGNED
+    expect(unread.body.data.unreadCount).toBe(0); // E-13: taking a case does not notify the analyst about their own action
   });
 
   it('AUD-25: whitespace-only resolutionSummary and non-string notes → 422', async () => {
@@ -94,7 +95,7 @@ describe('Case lifecycle', () => {
 
   it('AUD-39: fraud-pattern clusters report the number of distinct customers', async () => {
     const { analyst } = await setup(); // customer 1: one HIGH transaction on dev-x
-    const c2 = await seedUser({ email: `second${Date.now()}@test.com` });
+    const c2 = await seedUser({ email: uniqueEmail('second') });
     const second = await loginAgent(c2.user.email, c2.password);
     await second.post('/customer-api/transactions').send(highRisk); // customer 2, same device dev-x
     await second.post('/customer-api/transactions').send({ ...highRisk, deviceId: 'solo' });
@@ -254,7 +255,7 @@ describe('L-04 only the assigned analyst changes the status; reassigning keeps t
     const again = await assign(analyst, caseId);
     expect(again.status).toBe(200);
     expect(again.body.data.status).toBe('ASSIGNED');
-    expect(await NotificationModel.countDocuments({ recipientId: analystUser._id })).toBe(1);
+    expect(await NotificationModel.countDocuments({ recipientId: analystUser._id })).toBe(0); // E-13: not even the first assign notifies the assigner
     expect(await AuditLogModel.countDocuments({ action: 'CASE_ASSIGNED' })).toBe(1);
   });
 
@@ -318,16 +319,17 @@ describe('L-02 closing a case releases the transaction and informs the customer'
     expect(actions).toEqual(expect.arrayContaining(['CASE_STATUS_CHANGED', 'FRAUD_ALERT_STATUS_CHANGED', 'TRANSACTION_RELEASED']));
   });
 
-  it('RESOLVED: alert REVIEWED, the transaction stays HELD, customer notified', async () => {
+  it('RESOLVED = fraud confirmed (B-02): alert REVIEWED, the HELD transaction becomes BLOCKED, customer notified', async () => {
     const { customer, analyst, caseId, transaction, alertId } = await workflow();
     await assign(analyst, caseId);
     await patchStatus(analyst, caseId, { status: 'UNDER_REVIEW' });
     expect((await patchStatus(analyst, caseId, { status: 'RESOLVED', resolutionSummary: 'Confirmed fraud' })).status).toBe(200);
-    expect((await TransactionModel.findById(transaction._id)).status).toBe('HELD');
+    expect((await TransactionModel.findById(transaction._id)).status).toBe('BLOCKED');
     expect((await FraudAlertModel.findById(alertId)).status).toBe('REVIEWED');
     const outcome = (await customer.get('/notification-api/notifications')).body.data[0];
-    expect(outcome).toMatchObject({ type: 'FRAUD_ALERT', title: 'Fraud Review Completed' });
-    expect(outcome.message).toMatch(/remains held/);
+    expect(outcome).toMatchObject({ type: 'FRAUD_ALERT', title: 'Fraud Confirmed' });
+    expect(outcome.message).toMatch(/confirmed it as fraudulent/);
+    expect(outcome.message).toMatch(/payment has been blocked/);
     expect(await AuditLogModel.countDocuments({ action: 'TRANSACTION_RELEASED' })).toBe(0);
   });
 
@@ -337,7 +339,10 @@ describe('L-02 closing a case releases the transaction and informs the customer'
     const mk = async (status, riskLevel) => {
       const transaction = await seedTransaction({ userId: customerUser._id, status, riskLevel, fraudScore: 80, recommendedAction: 'BLOCK', deviceId: `dev-${uniq()}`, estimatedLoss: 500 });
       const alert = await FraudAlertModel.create({ transactionId: transaction._id, userId: customerUser._id, alertType: 'COMPOSITE', riskLevel, fraudScore: 80, reasons: [] });
-      const created = await analyst.post('/analyst-api/cases').send({ fraudAlertId: String(alert._id) });
+      // E-05: POST /cases refuses MEDIUM alerts, so a case on a MEDIUM alert (legacy data) is inserted directly.
+      const created = riskLevel === 'MEDIUM'
+        ? { body: { data: await createWithSequentialId(FraudCaseModel, 'publicId', 'CASE', { fraudAlertId: alert._id, transactionId: transaction._id, status: 'OPEN' }) } }
+        : await analyst.post('/analyst-api/cases').send({ fraudAlertId: String(alert._id) });
       const caseId = created.body.data._id;
       await assign(analyst, caseId);
       await patchStatus(analyst, caseId, { status: 'DISMISSED', resolutionSummary: 'fp' });
@@ -405,7 +410,7 @@ describe('L-04 races', () => {
     expect(changed.body.message).toMatch(/updated by someone else/);
     expect((await FraudCaseModel.findById(caseId)).status).toBe('UNDER_REVIEW');
     expect((await TransactionModel.findById(transaction._id)).status).toBe('HELD');   // nothing released
-    expect((await FraudAlertModel.findById(alertId)).status).toBe('REVIEWED');        // alert untouched
+    expect((await FraudAlertModel.findById(alertId)).status).toBe('OPEN');            // alert untouched (B-04: still OPEN while the case is open)
     expect(await NotificationModel.countDocuments({ recipientId: transaction.userId })).toBe(1); // only the original alert notice
 
     // …and when the case was CLOSED in the meantime the answer is the plain "already closed" 400
@@ -430,7 +435,7 @@ describe('L-04 races', () => {
     const winner = a.status === 200 ? 'RESOLVED' : 'DISMISSED';
     expect((await FraudCaseModel.findById(caseId)).status).toBe(winner);
     expect((await FraudAlertModel.findById(alertId)).status).toBe(winner === 'RESOLVED' ? 'REVIEWED' : 'DISMISSED');
-    expect((await TransactionModel.findById(transaction._id)).status).toBe(winner === 'RESOLVED' ? 'HELD' : 'APPROVED');
+    expect((await TransactionModel.findById(transaction._id)).status).toBe(winner === 'RESOLVED' ? 'BLOCKED' : 'APPROVED');
     expect(await NotificationModel.countDocuments({ recipientId: transaction.userId, title: /Cleared|Completed/ })).toBe(1);
   });
 

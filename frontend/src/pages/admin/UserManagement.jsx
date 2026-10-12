@@ -5,7 +5,8 @@
  *   PATCH /admin-api/users/:id/status with body { isActive: !currentActive } (C-P7-07).
  *   ADMIN accounts cannot be toggled (the API answers 403) and you cannot deactivate yourself.
  *   N-02: a failed load shows the error + Retry (not "No users found"); N-07: the confirm dialog
- *   cannot be dismissed while the request is running.
+ *   cannot be dismissed while the request is running. A-08: users created by the demo-data generator
+ *   (isSimulated) carry a "Simulated" tag.
  */
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
@@ -18,7 +19,7 @@ import { useFetch } from '../../hooks/useFetch.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Pagination from '../../components/common/Pagination.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
-import Spinner from '../../components/common/Spinner.jsx';
+import TableSkeleton from '../../components/common/TableSkeleton.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import BusyRegion from '../../components/common/BusyRegion.jsx';
@@ -40,12 +41,12 @@ export default function UserManagement() {
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data, loading, error, reload } = useFetch(async () => {
+  const { data, loading, error, reload } = useFetch(async (signal) => {
     const params = { page, limit: PAGINATION.DEFAULT_LIMIT_ADMIN };
     if (q) params.search = q;
     if (role) params.role = role;
     if (active) params.isActive = active;
-    const res = await api.get(API_PATHS.ADMIN.USERS, { params });
+    const res = await api.get(API_PATHS.ADMIN.USERS, { params, signal });
     return { users: res.data.data, pagination: res.data.pagination };
   }, [page, q, role, active]);
 
@@ -95,21 +96,24 @@ export default function UserManagement() {
 
       {error ? (
         <LoadError message={error} onRetry={reload} />
-      ) : loading && !data ? <Spinner /> : users.length === 0 ? (
+      ) : loading && !data ? <TableSkeleton cols={8} /> : users.length === 0 ? (
         <EmptyState title="No users found" message="Try different filters." />
       ) : (
         <BusyRegion busy={loading}>
           <div className={TABLE.wrapper}>
             <table className={TABLE.table}>
               <thead className={TABLE.thead}>
-                <tr>{['Name', 'Email', 'Role', 'Trust', 'Status', 'Joined', 'Last sign-in', ''].map((h) => <th key={h || 'a'} className={TABLE.th}>{h}</th>)}</tr>
+                <tr>{['Name', 'Email', 'Role', 'Trust', 'Status', 'Joined', 'Last sign-in', ''].map((h) => <th key={h || 'a'} className={TABLE.th}>{h || <span className="sr-only">Actions</span>}</th>)}</tr>
               </thead>
               <tbody className={TABLE.tbody}>
                 {users.map((u) => {
                   const locked = u.role === ROLES.ADMIN || u._id === me?.id;
                   return (
                     <tr key={u._id} className={TABLE.tr}>
-                      <td className={TABLE.td}>{u.name}</td>
+                      <td className={TABLE.td}>
+                        {u.name}
+                        {u.isSimulated === true && <span className="ml-2 rounded-full border border-gray-300 bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700" title="Created by the demo-data generator">Simulated</span>}
+                      </td>
                       <td className={TABLE.td}>{u.email}</td>
                       <td className={TABLE.td}>{u.role}</td>
                       <td className={TABLE.td}>{u.trustScore}</td>

@@ -75,8 +75,6 @@ describe('N-13: validation matches the server', () => {
     ['New-device penalty (0–100)', '-1', 'Must be 0 or more'],
     ['High-value amount (₹)', '-5', 'Must be 0 or more'],
     ['High-value amount (₹)', '2000000000', 'Cannot exceed 1,000,000,000'],
-    ['Location deviation (km)', '-1', 'Must be 0 or more'],
-    ['Location deviation (km)', '1000001', 'Cannot exceed 1,000,000'],
     ['Max transactions per hour', '100001', 'Cannot exceed 100,000'],
     ['Max transactions per day', '100001', 'Cannot exceed 100,000'],
   ])('%s = %s → "%s" and nothing is sent', async (label, value, message) => {
@@ -136,10 +134,21 @@ describe('PATCH payload', () => {
       amountThreshold: 60000,
       velocityLimit: { maxPerHour: 5, maxPerDay: 20 },
       scoreThresholds: { mediumMin: 25, highMin: 50, criticalMin: 75 },
-      locationDeviationKm: 500,
       newDeviceWeight: 20,
       highRiskMerchants: ['CASINO', 'CRYPTO_EXCHANGE', 'ADULT', 'ECOMMERCE'], // same keys the server stores
     });
+  });
+
+  it('A-05: the unused "Location deviation (km)" control is hidden and the stored value is never sent', async () => {
+    api.get.mockResolvedValue(ok({ ...CONFIG, locationDeviationKm: 750 }));
+    api.patch.mockResolvedValueOnce(ok({ ...CONFIG, locationDeviationKm: 750 }));
+    renderPage();
+    await screen.findByDisplayValue('50000');
+    expect(screen.queryByLabelText(/location deviation/i)).toBeNull();
+    expect(screen.queryByDisplayValue('750')).toBeNull();
+    save();
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    expect(api.patch.mock.calls[0][1]).not.toHaveProperty('locationDeviationKm'); // partial PATCH → server keeps 750
   });
 
   it('shows the server message when saving fails', async () => {

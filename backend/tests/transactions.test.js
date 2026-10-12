@@ -1,7 +1,7 @@
 // tests/transactions.test.js — CustomerAPI transaction pipeline (Phase 4 + Phase 5 + audit fixes)
 import { beforeAll, afterAll, beforeEach, describe, it, expect, jest } from '@jest/globals';
 import { connectTestDB, disconnectTestDB, clearCollections } from './setup.js';
-import { seedUser } from './helpers/seedUser.js';
+import { seedUser, uniqueEmail } from './helpers/seedUser.js';
 import { seedTransaction } from './helpers/seedTransaction.js';
 import { seedConfig } from './helpers/seedConfig.js';
 import { loginAgent } from './helpers/authAgent.js';
@@ -33,7 +33,7 @@ const txn = (o = {}) => ({
   ...o,
 });
 
-async function customer(email = `c${Date.now()}@test.com`) {
+async function customer(email = uniqueEmail('c')) {
   const { user, password } = await seedUser({ email });
   return { user, agent: await loginAgent(user.email, password) };
 }
@@ -275,8 +275,8 @@ describe('L-01 MEDIUM (approved, no OTP) never teaches the trusted baseline', ()
     await seedTransaction({ userId: user._id, amount: 100, deviceId: 'low-dev', location: { city: 'Pune', country: 'IN' } });
     await seedTransaction({ userId: user._id, amount: 900, deviceId: 'med-dev', riskLevel: 'MEDIUM', location: { city: 'Goa', country: 'IN' } });
     await seedTransaction({ userId: user._id, amount: 800, deviceId: 'held-dev', riskLevel: 'HIGH', status: 'HELD', location: { city: 'Agra', country: 'IN' } });
-    const last = await seedTransaction({ userId: user._id, amount: 300, deviceId: 'low-dev', location: { city: 'pune', country: 'IN' } });
-    const profile = await calcBehaviorProfile(user._id, last);
+    await seedTransaction({ userId: user._id, amount: 300, deviceId: 'low-dev', location: { city: 'pune', country: 'IN' } });
+    const profile = await calcBehaviorProfile(user._id);
     expect(profile.avgTransactionAmount).toBe(200);
     expect(profile.maxTransactionAmount).toBe(300);
     expect(profile.knownDeviceIds).toEqual(['low-dev']);
@@ -287,8 +287,8 @@ describe('L-01 MEDIUM (approved, no OTP) never teaches the trusted baseline', ()
 
   it('returns null (and writes nothing) when nothing qualifies — the old bootstrap branch was dead code', async () => {
     const { user } = await customer();
-    const held = await seedTransaction({ userId: user._id, status: 'HELD', riskLevel: 'HIGH' });
-    expect(await calcBehaviorProfile(user._id, held)).toBeNull();
+    await seedTransaction({ userId: user._id, status: 'HELD', riskLevel: 'HIGH' });
+    expect(await calcBehaviorProfile(user._id)).toBeNull();
     expect(await BehaviorProfileModel.countDocuments({ userId: user._id })).toBe(0);
   });
 });
@@ -313,7 +313,7 @@ describe('L-08 / N-28 one submission at a time per user', () => {
   // (needs a database that survives concurrent first-use upserts of the id counter; the lock
   //  itself is proven independent per key in units.test.js)
   itAtomic('different users are NOT serialised behind each other', async () => {
-    const [a, b] = await Promise.all([customer(`la${Date.now()}@test.com`), customer(`lb${Date.now()}@test.com`)]);
+    const [a, b] = await Promise.all([customer(uniqueEmail('la')), customer(uniqueEmail('lb'))]);
     const results = await Promise.all([
       ...Array.from({ length: 3 }, (_, i) => post(a.agent, txn({ amount: 10 + i }))),
       ...Array.from({ length: 3 }, (_, i) => post(b.agent, txn({ amount: 20 + i, deviceId: 'dev-b' }))),
@@ -355,7 +355,7 @@ describe('L-10 / N-26 transaction input validation', () => {
       [{ location: ['Mumbai'] }, /Location must be an object/],
       [{ location: { city: { a: 1 } } }, /Location city must be a string/],
       [{ location: { city: 'c'.repeat(101) } }, /cannot exceed 100/],
-      [{ location: { country: 'c'.repeat(101) } }, /cannot exceed 100/],
+      [{ location: { city: 'Mumbai', country: 'c'.repeat(101) } }, /cannot exceed 100/], // E-06: the city is required, so the country case carries one
       [{ location: { city: '   ' } }, /cannot be an empty string/],
       [{ amount: [5] }, /Amount must be a number/],
       [{ amount: { a: 1 } }, /Amount must be a number/],
@@ -606,9 +606,9 @@ describe('L-15 indexes', () => {
 });
 
 describe('round 2: alert creation failure after the transaction was saved', () => {
-  const casino = { amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'CARD', deviceId: 'dev-r2' };
+  const casino = { amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'CARD', deviceId: 'dev-r2', location: { city: 'Mumbai', country: 'IN' } };
   const submit = async (failures) => {
-    const c = await seedUser({ email: `r2alert${failures}${Date.now()}@test.com` });
+    const c = await seedUser({ email: uniqueEmail(`r2alert${failures}_`) });
     const customer = await loginAgent(c.user.email, c.password);
     const spy = jest.spyOn(FraudAlertModel, 'create');
     for (let i = 0; i < failures; i += 1) spy.mockRejectedValueOnce(new Error('alert insert failed'));

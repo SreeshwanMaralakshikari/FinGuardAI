@@ -24,6 +24,35 @@ const connectDB = async () => {
   return conn;
 };
 
+/**
+ * E-17: Mongoose builds indexes in the background after connecting and nothing reports a
+ * failure. A unique index (e.g. one case per alert, one alert per transaction) fails to build
+ * when the collection already holds duplicates, or when an index with the same key but other
+ * options exists — and the guarantee is then silently missing. Wait for every model's index
+ * build and log each failure with the model name. Never throws and never exits: the API stays
+ * up, the operator sees the problem in the logs.
+ * @param {Record<string, { init: () => Promise<unknown> }>} [models]  defaults to mongoose.models
+ * @returns {Promise<{ model: string, error: Error }[]>} the failures (empty = all indexes are in place)
+ */
+export const ensureIndexes = async (models = mongoose.models) => {
+  const entries = Object.entries(models);
+  const results = await Promise.allSettled(entries.map(([, model]) => model.init()));
+  const failures = [];
+  results.forEach((result, i) => {
+    if (result.status !== 'rejected') return;
+    const [name] = entries[i];
+    const error = result.reason;
+    const hint = error?.code === 11000
+      ? 'duplicate values already exist — remove the duplicates, then restart or run `npm run db:sync-indexes`'
+      : [85, 86].includes(error?.code)
+        ? 'an index with the same key but different options exists — drop the old index (run `npm run db:sync-indexes`), then restart'
+        : 'see the message above; `npm run db:sync-indexes` re-applies the schema indexes';
+    console.error(`[DB] Index build FAILED for model ${name}: ${error?.message ?? error} (${hint})`);
+    failures.push({ model: name, error });
+  });
+  return failures;
+};
+
 /** Close the connection — used by graceful shutdown in server.js */
 export const disconnectDB = () => mongoose.connection.close(false);
 

@@ -79,3 +79,32 @@ describe('logout and change password', () => {
     expect(store.getState().auth).toMatchObject({ isAuthenticated: false, loading: false });
   });
 });
+
+describe('logoutThunk (E-01)', () => {
+  const signedInState = () => makeStore({ auth: { ...authReducer(undefined, { type: '@@INIT' }), loading: false, isAuthenticated: true, user: USER } });
+
+  it('success → signed out', async () => {
+    api.post.mockResolvedValueOnce({ data: { success: true } });
+    const store = signedInState();
+    const action = await store.dispatch(logoutThunk());
+    expect(logoutThunk.fulfilled.match(action)).toBe(true);
+    expect(store.getState().auth).toMatchObject({ isAuthenticated: false, loading: false });
+  });
+
+  it.each([401, 403, 500, 503])('ANY HTTP answer (%i) counts as signed out: the thunk is fulfilled, not rejected', async (status) => {
+    api.post.mockRejectedValueOnce({ response: { status, data: { message: 'Account has been deactivated' } } });
+    const store = signedInState();
+    const action = await store.dispatch(logoutThunk());
+    expect(logoutThunk.fulfilled.match(action)).toBe(true);
+    expect(store.getState().auth).toMatchObject({ isAuthenticated: false, loading: false, user: { id: null } });
+  });
+
+  it('only a request that got NO response is rejected (the server cookie may still be valid) — and the client still signs out locally', async () => {
+    api.post.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { isAxiosError: true, code: 'ERR_NETWORK' }));
+    const store = signedInState();
+    const action = await store.dispatch(logoutThunk());
+    expect(logoutThunk.rejected.match(action)).toBe(true);
+    expect(action.payload).toBe('Cannot reach the server - check your connection and try again.');
+    expect(store.getState().auth).toMatchObject({ isAuthenticated: false, loading: false });
+  });
+});

@@ -1,4 +1,5 @@
-// SubmitTransaction: payload (blank stripping, deviceId), free-text merchant category (N-18), result view
+// SubmitTransaction: payload (blank stripping, deviceId), free-text merchant category (N-18), result view,
+// amount rules (E-07), required city (E-06), Idempotency-Key lifecycle (C-01)
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import SubmitTransaction from '../customer/SubmitTransaction.jsx';
@@ -25,6 +26,44 @@ describe('SubmitTransaction', () => {
     submit();
     expect(await screen.findByText('Amount is required')).toBeInTheDocument();
     expect(screen.getByText('Merchant name is required')).toBeInTheDocument();
+    expect(screen.getByText('City is required')).toBeInTheDocument(); // E-06
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['0', 'Amount must be at least ₹0.01'],
+    ['0.005', 'Amount must be at least ₹0.01'],
+    ['-5', 'Amount must be at least ₹0.01'],
+    ['10.123', 'Amount can have at most 2 decimal places'],
+    ['1000000001', 'Amount cannot exceed ₹100 crore'],
+  ])('E-07: amount %s is rejected in the form ("%s")', async (value, message) => {
+    renderPage();
+    type(/amount/i, value);
+    type(/merchant name/i, 'Shop');
+    type(/city/i, 'Pune');
+    submit();
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it.each(['0.01', '10', '10.5', '10.55', '1.1', '19.99'])('E-07: amount %s is accepted', async (value) => {
+    api.post.mockResolvedValueOnce(ok(RESULT));
+    renderPage();
+    type(/amount/i, value);
+    type(/merchant name/i, 'Shop');
+    type(/city/i, 'Pune');
+    submit();
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(api.post.mock.calls[0][1].amount).toBe(Number(value));
+  });
+
+  it('E-06: a blank or whitespace-only city is refused client-side (the server requires location.city)', async () => {
+    renderPage();
+    type(/amount/i, '5');
+    type(/merchant name/i, 'Shop');
+    type(/city/i, '   ');
+    submit();
+    expect(await screen.findByText('City is required')).toBeInTheDocument();
     expect(api.post).not.toHaveBeenCalled();
   });
 
@@ -33,14 +72,18 @@ describe('SubmitTransaction', () => {
     renderPage();
     type(/amount/i, '1200');
     type(/merchant name/i, '  Cafe  ');
+    type(/city/i, ' Pune ');
     submit();
     expect(await screen.findByText('TXN-2026-00001')).toBeInTheDocument();
 
     const [path, payload] = api.post.mock.calls[0];
     expect(path).toBe('/customer-api/transactions');
-    expect(payload).toEqual({ amount: 1200, merchantName: 'Cafe', paymentMethod: 'UPI', deviceId: expect.stringMatching(/^web-/) });
+    expect(payload).toEqual({
+      amount: 1200, merchantName: 'Cafe', paymentMethod: 'UPI', deviceId: expect.stringMatching(/^web-/),
+      location: { city: 'Pune' }, // E-06: always present; the blank country is omitted
+    });
     expect(payload).not.toHaveProperty('merchantCategory'); // blank → omitted (the API rejects empty strings)
-    expect(payload).not.toHaveProperty('location');
+    expect(payload).not.toHaveProperty('idempotencyKey'); // travels as a header, not in the body
     expect(localStorage.getItem('finguard:device-id')).toBe(payload.deviceId); // same id on the next submit
   });
 
@@ -72,6 +115,7 @@ describe('SubmitTransaction', () => {
     renderPage();
     type(/amount/i, '5');
     type(/merchant name/i, 'Shop');
+    type(/city/i, 'Pune');
     submit();
     expect(await screen.findByRole('alert')).toHaveTextContent('Amount must be greater than 0');
     expect(screen.getByLabelText(/merchant name/i)).toHaveValue('Shop');
@@ -82,11 +126,68 @@ describe('SubmitTransaction', () => {
     renderPage();
     type(/amount/i, '99999');
     type(/merchant name/i, 'Big Shop');
+    type(/city/i, 'Pune');
     submit();
     expect(await screen.findByText('Held for review by a fraud analyst.')).toBeInTheDocument();
     expect(screen.getByText('Amount is unusually high')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /view fraud alerts/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /submit another/i }));
     expect(screen.getByLabelText(/merchant name/i)).toHaveValue('');
+  });
+
+  describe('C-01: Idempotency-Key', () => {
+    const fill = () => { type(/amount/i, '25'); type(/merchant name/i, 'Shop'); type(/city/i, 'Pune'); };
+    const keyOf = (call) => call[2]?.headers?.['Idempotency-Key'];
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+    it('sends a UUID in the Idempotency-Key header and keeps it out of the body', async () => {
+      api.post.mockResolvedValueOnce(ok(RESULT));
+      renderPage();
+      fill();
+      submit();
+      await screen.findByText('TXN-2026-00001');
+      expect(keyOf(api.post.mock.calls[0])).toMatch(UUID);
+    });
+
+    it('REUSES the key when the user retries after a failure, and issues a new one after a success', async () => {
+      api.post
+        .mockRejectedValueOnce(fail(500, 'Something broke'))
+        .mockResolvedValueOnce(ok(RESULT))
+        .mockResolvedValueOnce(ok({ ...RESULT, publicId: 'TXN-2026-00002' }));
+      renderPage();
+      fill();
+      submit();
+      await screen.findByRole('alert');
+      submit(); // retry
+      await screen.findByText('TXN-2026-00001');
+      const [first, retry] = api.post.mock.calls.map(keyOf);
+      expect(retry).toBe(first);
+
+      fireEvent.click(screen.getByRole('button', { name: /submit another/i }));
+      fill();
+      submit();
+      await screen.findByText('TXN-2026-00002');
+      const third = keyOf(api.post.mock.calls[2]);
+      expect(third).toMatch(UUID);
+      expect(third).not.toBe(first); // a success ends the attempt
+    });
+
+    it('without any server response it warns that the payment may exist and points to Transaction history', async () => {
+      api.post.mockRejectedValueOnce(Object.assign(new Error('timeout of 20000ms exceeded'), { isAxiosError: true, code: 'ECONNABORTED' }));
+      renderPage();
+      fill();
+      submit();
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Cannot reach the server');
+      expect(alert).toHaveTextContent(/check Transaction history before trying again/i);
+    });
+
+    it('a normal server error does NOT carry the "check history" warning', async () => {
+      api.post.mockRejectedValueOnce(fail(422, 'Amount must be greater than 0'));
+      renderPage();
+      fill();
+      submit();
+      expect(await screen.findByRole('alert')).not.toHaveTextContent(/transaction history/i);
+    });
   });
 });

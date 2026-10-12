@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
 import {
-  fetchNotificationsThunk, markNotificationReadThunk, markAllReadThunk,
+  fetchNotificationsThunk, markNotificationReadThunk, markAllReadThunk, setPanelOpen,
 } from '../../store/slices/notificationSlice.js';
 import { NOTIFICATION_COLORS, formatDate } from '../../utils/common.js';
 import { PAGINATION } from '../../utils/constants.js';
@@ -41,6 +41,12 @@ export default function NotificationPanel() {
   useEffect(() => {
     if (open) load();
   }, [open, load]);
+
+  // F-01: tell the socket hook whether the list is on screen (it refetches it after a reconnect)
+  useEffect(() => {
+    dispatch(setPanelOpen(open));
+    return () => { dispatch(setPanelOpen(false)); };
+  }, [open, dispatch]);
 
   useEffect(() => {
     if (!open) return undefined;

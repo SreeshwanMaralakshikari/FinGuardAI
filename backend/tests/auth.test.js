@@ -66,7 +66,7 @@ describe('POST /auth/register', () => {
   });
 
   it('requires role (422 when missing)', async () => {
-    const { role, ...noRole } = newUser({ email: 'norole@test.com' });
+    const { role: _role, ...noRole } = newUser({ email: 'norole@test.com' });
     const res = await createAgent().post('/auth/register').send(noRole);
     expect(res.status).toBe(422);
   });
@@ -383,17 +383,22 @@ describe('L-09 / BS-19 login', () => {
 describe('L-15 dead sessions clear the cookie (logout, check-auth)', () => {
   const cleared = (res) => (res.headers['set-cookie'] ?? []).some((c) => /^token=;/.test(c) && /Expires=Thu, 01 Jan 1970/.test(c));
 
-  it('a deactivated user: 403 and the cookie is removed (check-auth and logout)', async () => {
+  it('a deactivated user: 401 ACCOUNT_DEACTIVATED and the cookie is removed (check-auth and logout) — E-01', async () => {
     const { user, password } = await seedUser({ email: 'deact@test.com' });
     const login = await createAgent().post('/auth/login').send({ email: user.email, password });
     const cookie = `token=${tokenFromCookies(login.headers['set-cookie'])}`;
     await UserModel.updateOne({ _id: user._id }, { isActive: false });
     const check = await createAgent().get('/auth/check-auth').set('Cookie', cookie);
-    expect(check.status).toBe(403);
+    expect(check.status).toBe(401);
+    expect(check.body).toEqual({ success: false, message: 'Account has been deactivated. Contact support.', code: 'ACCOUNT_DEACTIVATED' });
     expect(cleared(check)).toBe(true);
+    // Logout of a dead session still answers (401) AND removes the cookie, so the browser is signed out.
     const logout = await createAgent().post('/auth/logout').set('Cookie', cookie);
-    expect(logout.status).toBe(403);
+    expect(logout.status).toBe(401);
+    expect(logout.body.code).toBe('ACCOUNT_DEACTIVATED');
     expect(cleared(logout)).toBe(true);
+    // …while a fresh LOGIN of that account stays 403 (a refused login, not a dead session).
+    expect((await createAgent().post('/auth/login').send({ email: user.email, password })).status).toBe(403);
   });
 
   it('an invalid or expired token: 401 and the cookie is removed; no cookie at all: 401, nothing to remove', async () => {

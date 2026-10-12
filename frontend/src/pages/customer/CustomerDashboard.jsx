@@ -21,22 +21,22 @@ import EmptyState from '../../components/common/EmptyState.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
-const fetchPreview = async (path) => {
-  const res = await api.get(path, { params: { limit: 5 } });
+const fetchPreview = async (path, signal) => {
+  const res = await api.get(path, { params: { limit: 5 }, signal });
   return { rows: res.data.data ?? [], total: res.data.pagination?.total ?? 0 };
 };
 
 export default function CustomerDashboard() {
   const user = useAppSelector((s) => s.auth.user);
 
-  const recentTx = useFetch(() => fetchPreview(API_PATHS.CUSTOMER.TRANSACTIONS), []);
-  const recentAlerts = useFetch(() => fetchPreview(API_PATHS.CUSTOMER.FRAUD_ALERTS), []);
+  const recentTx = useFetch((signal) => fetchPreview(API_PATHS.CUSTOMER.TRANSACTIONS, signal), []);
+  const recentAlerts = useFetch((signal) => fetchPreview(API_PATHS.CUSTOMER.FRAUD_ALERTS, signal), []);
   const trust = useFetch(
-    async () => (await api.get(API_PATHS.CUSTOMER.TRUST_SCORE)).data.data,
+    async (signal) => (await api.get(API_PATHS.CUSTOMER.TRUST_SCORE, { signal })).data.data,
     [],
   );
   const openAlerts = useFetch(
-    async () => (await api.get(API_PATHS.CUSTOMER.FRAUD_ALERTS, { params: { status: 'OPEN', limit: 1 } })).data.pagination.total,
+    async (signal) => (await api.get(API_PATHS.CUSTOMER.FRAUD_ALERTS, { params: { status: 'OPEN', limit: 1 }, signal })).data.pagination.total,
     [],
   );
 
@@ -53,7 +53,7 @@ export default function CustomerDashboard() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <StatCard label="Trust score" value={trust.data ? `${trust.data.trustScore}/100` : '—'} hint="Drops after risky activity, recovers with safe payments" loading={trust.loading && !trust.data} />
-        <StatCard label="Open fraud alerts" value={openAlerts.data ?? '—'} hint="Alerts that have not been closed yet (medium-risk alerts are not sent to an analyst)" loading={openAlerts.loading && openAlerts.data == null} />
+        <StatCard label="Open fraud alerts" value={openAlerts.data ?? '—'} hint="Alerts that are still open. Medium-risk alerts go to no analyst: acknowledge them yourself on the Fraud alerts page" loading={openAlerts.loading && openAlerts.data == null} />
         <StatCard label="Total transactions" value={recentTx.data ? recentTx.data.total : '—'} loading={recentTx.loading && !recentTx.data} />
       </div>
       <div className="mt-4 space-y-2">

@@ -4,7 +4,7 @@
 import { beforeAll, afterAll, beforeEach, describe, it, expect, jest } from '@jest/globals';
 import supertest from 'supertest';
 import { connectTestDB, disconnectTestDB, clearCollections } from './setup.js';
-import { seedUser } from './helpers/seedUser.js';
+import { seedUser, uniqueEmail } from './helpers/seedUser.js';
 import UserModel from '../models/UserModel.js';
 import AuditLogModel from '../models/AuditLogModel.js';
 
@@ -28,7 +28,7 @@ const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('W
 let ipCounter = 0;
 async function customerAgent() {
   ipCounter += 1;
-  const { user, password } = await seedUser({ email: `up${Date.now()}_${ipCounter}@test.com` });
+  const { user, password } = await seedUser({ email: uniqueEmail('up') });
   const agent = supertest.agent(app).set('X-Forwarded-For', `198.18.0.${ipCounter}`);
   const login = await agent.post('/auth/login').send({ email: user.email, password });
   expect(login.status).toBe(200);
@@ -64,7 +64,7 @@ describe('profile image upload', () => {
       expect(res.body.data.profileImage).toBe(urlFor(imageCounter));
     }
     expect((await UserModel.findById(user._id)).profileImage).toBe(urlFor(3));
-    expect(mockCloudinary.uploader.upload_stream).toHaveBeenCalledWith(expect.objectContaining({ folder: 'finguardai/profiles', resource_type: 'image' }), expect.any(Function));
+    expect(mockCloudinary.uploader.upload_stream).toHaveBeenCalledWith(expect.objectContaining({ folder: 'finguardai/profiles', resource_type: 'image', allowed_formats: ['jpg', 'png', 'webp'], transformation: [{ width: 512, height: 512, crop: 'limit' }], unique_filename: true }), expect.any(Function)); // D-08
     const profile = await agent.get('/customer-api/profile');
     expect(profile.status).toBe(200);
     expect(profile.body.data).not.toHaveProperty('password');

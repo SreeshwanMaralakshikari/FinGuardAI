@@ -21,3 +21,27 @@ export function endSessionRequests() {
   controller.abort();
   controller = new AbortController();
 }
+
+// ─── "Why was I signed out?" notice (E-01) ───────────────────────────────────
+// The axios interceptor forces a hard redirect to /login when the server ends a session. React
+// state does not survive that, so the reason travels in sessionStorage (tab-scoped, cleared when
+// the tab closes) and the login page shows it once. Every access is guarded: storage can throw
+// (private mode, blocked site data) and the app must work without it.
+const NOTICE_KEY = 'finguard:session-notice';
+
+/** Shown on /login after the server ended the session because the account was deactivated. */
+export const DEACTIVATED_NOTICE = 'Account has been deactivated. Contact support.';
+
+/** @param {string} message text to show on the login page */
+export function rememberSessionNotice(message) {
+  try { sessionStorage.setItem(NOTICE_KEY, message); } catch { /* storage unavailable: no notice */ }
+}
+
+/** @returns {string} the pending notice ('' when none) — does not clear it */
+export function peekSessionNotice() {
+  try { return sessionStorage.getItem(NOTICE_KEY) ?? ''; } catch { return ''; }
+}
+
+export function clearSessionNotice() {
+  try { sessionStorage.removeItem(NOTICE_KEY); } catch { /* ignore */ }
+}

@@ -6,13 +6,16 @@
  *   which starts as true until the first session check settles (AUD-12/AUD-35).
  *   N-17: ProtectedRoute passes the page the visitor wanted in `location.state.from`; after
  *   signing in the user is returned there when their role may open it, else to the role home.
+ *   E-01: when the server ended the session because the account was deactivated, the axios
+ *   interceptor leaves a notice in sessionStorage (api/session.js); it is shown here once.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
 import { loginThunk, clearAuthError } from '../../store/slices/authSlice.js';
 import { resolvePostLogin } from '../../utils/navigation.js';
+import { peekSessionNotice, clearSessionNotice } from '../../api/session.js';
 import { BTN } from '../../utils/common.js';
 import AuthShell from '../../components/shared/AuthShell.jsx';
 import FormField from '../../components/common/FormField.jsx';
@@ -27,6 +30,9 @@ export default function LoginPage() {
     register, handleSubmit, formState: { errors, isSubmitting },
   } = useForm({ defaultValues: { email: '', password: '' } });
 
+  const [notice, setNotice] = useState(peekSessionNotice); // read in render (safe for StrictMode), cleared below
+
+  useEffect(() => { clearSessionNotice(); }, []);
   useEffect(() => () => { dispatch(clearAuthError()); }, [dispatch]);
 
   if (isAuthenticated && user?.role) {
@@ -34,6 +40,7 @@ export default function LoginPage() {
   }
 
   const onSubmit = async (values) => {
+    setNotice('');
     const action = await dispatch(loginThunk({ email: values.email.trim(), password: values.password }));
     if (loginThunk.fulfilled.match(action)) {
       navigate(resolvePostLogin(action.payload.role, from), { replace: true });
@@ -47,6 +54,7 @@ export default function LoginPage() {
       footer={<>New here? <Link to="/register" className="font-medium text-primary-600 hover:underline">Create an account</Link></>}
     >
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+        <Alert tone="warning">{notice}</Alert>
         <Alert tone="error">{error}</Alert>
 
         <FormField

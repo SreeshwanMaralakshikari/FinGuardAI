@@ -29,6 +29,7 @@ import { getMongoDbName, isLocalMongoUri } from '../config/mongoUri.js';
 
 const MIN_PASSWORD_LENGTH = 8;
 const MIN_STRONG_PASSWORD_LENGTH = 12;
+const MAX_PASSWORD_BYTES = 72; // bcrypt ignores everything after the 72nd byte (E-15)
 const PLACEHOLDER_PASSWORDS = ['change-me-strong-password'];
 
 /**
@@ -45,9 +46,16 @@ export const assertSeedConfig = (env = process.env) => {
   if (ADMIN_PASSWORD.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`ADMIN_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters`);
   }
+  // E-15: register / change-password reject this already; a longer seed password would be
+  // silently truncated, so the admin could log in with only its first 72 bytes.
+  if (Buffer.byteLength(ADMIN_PASSWORD, 'utf8') > MAX_PASSWORD_BYTES) {
+    throw new Error(`ADMIN_PASSWORD must be at most ${MAX_PASSWORD_BYTES} bytes (bcrypt ignores the rest); non-English characters count as more than one`);
+  }
 
   // Seeding a production-like target: be strict.
-  const strict = env.NODE_ENV === 'production' || !isLocalMongoUri(MONGODB_URI);
+  // D-03: same rule as the server — only an explicit NODE_ENV=development|test relaxes the checks for a local database.
+  const productionLike = !['development', 'test'].includes((env.NODE_ENV ?? '').trim().toLowerCase());
+  const strict = productionLike || !isLocalMongoUri(MONGODB_URI);
 
   if (!getMongoDbName(MONGODB_URI)) {
     const message = 'MONGODB_URI has no database name (…mongodb.net/<dbname>?…) — the user would be created in "test"';

@@ -14,13 +14,16 @@
  *         /health and is retried once. Mutations are never retried.
  *   - 401 → redirect to /login, except for the silent session probe
  *     (check-auth) and public pages. [P9 — C-P9-01]
+ *   - E-01: a deactivated account is treated the same way: 401 with code ACCOUNT_DEACTIVATED
+ *     (current backend) or, from an older backend, a 403 whose message says "deactivated". The
+ *     reason is stored (api/session.js) and the login page shows it after the redirect.
  * @phase Phase 6 (original) → Phase 9 (deployment changes marked [P9])
  * @decision D-P6-03
  */
 import axios from 'axios';
 import { API_BASE_URL, API_TIMEOUT_MS } from './apiConfig.js';
 import { markServerContact, msSinceServerContact, waitForServer } from './serverHealth.js';
-import { getSessionSignal } from './session.js';
+import { getSessionSignal, rememberSessionNotice, DEACTIVATED_NOTICE } from './session.js';
 import { API_PATHS } from '../utils/constants.js';
 
 const api = axios.create({
@@ -39,6 +42,26 @@ const PUBLIC_PATHS = new Set(['/login', '/register']);
 // Render free tier sleeps after 15 min without traffic; re-check a little earlier.
 const POSSIBLY_ASLEEP_AFTER_MS = 10 * 60 * 1000;
 
+/** E-01: the server ended the session because an admin deactivated this account. */
+const isDeactivatedResponse = (error) => {
+  const status = error?.response?.status;
+  const body = error?.response?.data;
+  if (status === 401) return body?.code === 'ACCOUNT_DEACTIVATED';
+  // older backends: anchored, so the admin route's 403 'ADMIN accounts cannot be activated or deactivated via the API.' is NOT a deactivation
+  return status === 403 && /^Account has been deactivated/i.test(String(body?.message ?? '').trim());
+};
+
+/**
+ * AUD-40 / F-07: a request always ends with the session; when the caller brings its own signal
+ * (useFetch) either one cancels it. AbortSignal.any is missing in old browsers → the caller's
+ * signal alone is used there.
+ */
+const withSessionSignal = (own) => {
+  const session = getSessionSignal();
+  if (!own) return session;
+  return typeof AbortSignal.any === 'function' ? AbortSignal.any([own, session]) : own;
+};
+
 const methodOf = (config) => (config?.method ?? 'get').toLowerCase();
 
 /** True when the failure looks like "server asleep / booting", not a real API error. */
@@ -50,7 +73,7 @@ const isColdStartFailure = (error) =>
 
 api.interceptors.request.use(async (config) => {
   // AUD-40: tie the request to the current session so logout/login can cancel it
-  config.signal ??= getSessionSignal();
+  config.signal = withSessionSignal(config.signal);
   const isMutation = !RETRYABLE_METHODS.has(methodOf(config));
   if (isMutation && msSinceServerContact() > POSSIBLY_ASLEEP_AFTER_MS) {
     const ready = await waitForServer();
@@ -92,17 +115,23 @@ api.interceptors.response.use(
       if (ready) return api(config);
     }
 
-    if (error.response?.status === 401) {
+    const deactivated = isDeactivatedResponse(error);
+    if (error.response?.status === 401 || deactivated) {
       // [P9 — C-P9-01] checkAuthThunk runs on every page load, including
       // /register. A 401 from that probe just means "not logged in" and is
       // handled by the auth slice; redirecting would make /register
       // unreachable for logged-out users.
       const isSessionProbe = config?.url === API_PATHS.AUTH.CHECK_AUTH;
+      // E-01: signing out of an already-ended session is not an error worth a redirect or a notice
+      const isLogout = config?.url === API_PATHS.AUTH.LOGOUT;
       const onPublicPage = PUBLIC_PATHS.has(window.location.pathname);
 
-      if (!isSessionProbe && !onPublicPage) {
+      if (!isLogout && !onPublicPage) {
+        // The probe is not redirected here (ProtectedRoute does it in-app), but the reason is kept
+        // so the login page can explain a hard refresh that ended on /login.
+        if (deactivated) rememberSessionNotice(DEACTIVATED_NOTICE);
         // Use window.location to avoid a circular import with the Redux store
-        window.location.href = '/login';
+        if (!isSessionProbe) window.location.href = '/login';
       }
     }
 

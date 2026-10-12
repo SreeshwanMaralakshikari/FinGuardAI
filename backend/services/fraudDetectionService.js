@@ -24,7 +24,8 @@
  *
  * Exported function:
  *   checkFraud({ transaction, behaviorProfile, deviceReputation, thresholds })
- *     → { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals }
+ *     → { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals,
+ *         breakdown, rawScore }
  *
  * @param {Object} opts
  * @param {Object} opts.transaction      TransactionModel document (plain object or lean)
@@ -41,6 +42,10 @@
  *   signals:            string[], // distinct FraudAlert alertType of every rule that fired
  *                                 // (AMOUNT_ANOMALY, VELOCITY_BREACH, …) — lets callers classify
  *                                 // an alert without parsing the reason text (L-15)
+ *   breakdown:          Array<{ rule, label, points, max }>,
+ *                                 // B-01: ALL six rules in a fixed order (velocity, amount, location,
+ *                                 // device, time, merchant); points 0 included, max = the rule cap
+ *   rawScore:           number,   // B-01: sum of the six rule points BEFORE the clamp to 0–100
  * }}
  */
 
@@ -216,6 +221,16 @@ const merchantRiskCheck = (transaction, thresholds) => {
   return { score: Math.min(score, 35), reasons, type: 'HIGH_RISK_MERCHANT' };
 };
 
+// ─── Rule catalogue for the score breakdown (B-01) — `max` mirrors the Math.min cap of each evaluator ─
+const RULES = Object.freeze([
+  { rule: 'velocity', label: 'Transaction velocity',   max: 20 },
+  { rule: 'amount',   label: 'Amount anomaly',         max: 35 },
+  { rule: 'location', label: 'Unusual location',       max: 15 },
+  { rule: 'device',   label: 'Device risk',            max: 50 },
+  { rule: 'time',     label: 'Unusual time of day',    max: 10 },
+  { rule: 'merchant', label: 'High-risk merchant',     max: 35 },
+]);
+
 // ─── Input normalisation (AUD-18) ─────────────────────────────────────────────
 // The merge below uses object spread. Spreading a hydrated Mongoose document
 // copies its internals ({ $__, _doc, $isNew }), not its fields, so admin
@@ -224,6 +239,26 @@ const merchantRiskCheck = (transaction, thresholds) => {
 // correct even if one does not — without importing Mongoose (D-P5-07).
 const toPlain = (value) =>
   value && typeof value.toObject === 'function' ? value.toObject() : value;
+
+/** A usable number, or undefined: null, NaN, Infinity and non-numbers all fall back to the default (B-06). */
+const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
+
+// ─── Score → band (shared with the B-07 what-if preview so both always agree) ──────────────────
+/**
+ * LOW < mediumMin <= MEDIUM < highMin <= HIGH < criticalMin <= CRITICAL (lower bounds are inclusive).
+ * @param {number} fraudScore
+ * @param {{ mediumMin: number, highMin: number, criticalMin: number }} scoreThresholds
+ * @returns {'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'}
+ */
+const riskLevelForScore = (fraudScore, { mediumMin, highMin, criticalMin }) => {
+  if (fraudScore >= criticalMin) return 'CRITICAL';
+  if (fraudScore >= highMin)     return 'HIGH';
+  if (fraudScore >= mediumMin)   return 'MEDIUM';
+  return 'LOW';
+};
+
+/** The built-in bands used when SystemConfig holds none (a copy, so callers cannot mutate the defaults). */
+const defaultScoreThresholds = () => ({ ...DEFAULT_THRESHOLDS.scoreThresholds });
 
 // ─── Main exported function ───────────────────────────────────────────────────
 const checkFraud = ({
@@ -237,20 +272,26 @@ const checkFraud = ({
   // undefined, not null, so we must guard here explicitly.  (C-P5-02)
   const safeThresholds = toPlain(thresholds) ?? {};
 
-  // Merge caller-supplied thresholds with defaults (shallow, nested-safe)
+  // Merge caller-supplied thresholds with defaults PER FIELD (B-06). `??` (not spread) so an
+  // explicit null / NaN / non-number stored in SystemConfig falls back to the default instead of
+  // overriding it (a stored maxPerHour: null used to flag every payment with "limit: null").
   const effectiveThresholds = {
     ...DEFAULT_THRESHOLDS,
     ...safeThresholds,
+    amountThreshold:  num(safeThresholds.amountThreshold)  ?? DEFAULT_THRESHOLDS.amountThreshold,
+    newDeviceWeight:  num(safeThresholds.newDeviceWeight)  ?? DEFAULT_THRESHOLDS.newDeviceWeight,
     scoreThresholds: {
-      ...DEFAULT_THRESHOLDS.scoreThresholds,
-      ...(safeThresholds.scoreThresholds ?? {}),
+      mediumMin:   num(safeThresholds.scoreThresholds?.mediumMin)   ?? DEFAULT_THRESHOLDS.scoreThresholds.mediumMin,
+      highMin:     num(safeThresholds.scoreThresholds?.highMin)     ?? DEFAULT_THRESHOLDS.scoreThresholds.highMin,
+      criticalMin: num(safeThresholds.scoreThresholds?.criticalMin) ?? DEFAULT_THRESHOLDS.scoreThresholds.criticalMin,
     },
     velocityLimit: {
-      ...DEFAULT_THRESHOLDS.velocityLimit,
-      ...(safeThresholds.velocityLimit ?? {}),
+      maxPerHour: num(safeThresholds.velocityLimit?.maxPerHour) ?? DEFAULT_THRESHOLDS.velocityLimit.maxPerHour,
+      maxPerDay:  num(safeThresholds.velocityLimit?.maxPerDay)  ?? DEFAULT_THRESHOLDS.velocityLimit.maxPerDay,
     },
-    highRiskMerchants:
-      safeThresholds.highRiskMerchants ?? DEFAULT_THRESHOLDS.highRiskMerchants,
+    highRiskMerchants: Array.isArray(safeThresholds.highRiskMerchants)
+      ? safeThresholds.highRiskMerchants
+      : DEFAULT_THRESHOLDS.highRiskMerchants,
   };
 
   // Run all six evaluators
@@ -265,6 +306,15 @@ const checkFraud = ({
   const rawScore   = velocity.score + amount.score + location.score +
                      device.score   + time.score   + merchant.score;
   const fraudScore = Math.min(100, Math.max(0, rawScore));
+
+  // B-01: per-rule explanation. Fixed order, all six rules, 0 points included;
+  // `max` is the cap each evaluator applies, so sum(points) === rawScore.
+  const breakdown = RULES.map(({ rule, label, max }, i) => ({
+    rule,
+    label,
+    points: [velocity, amount, location, device, time, merchant][i].score,
+    max,
+  }));
 
   const reasons = [
     ...velocity.reasons,
@@ -281,12 +331,7 @@ const checkFraud = ({
     .map((rule) => rule.type);
 
   // Derive risk level from systemConfig score thresholds
-  const { mediumMin, highMin, criticalMin } = effectiveThresholds.scoreThresholds;
-  let riskLevel;
-  if      (fraudScore >= criticalMin) riskLevel = 'CRITICAL';
-  else if (fraudScore >= highMin)     riskLevel = 'HIGH';
-  else if (fraudScore >= mediumMin)   riskLevel = 'MEDIUM';
-  else                                riskLevel = 'LOW';
+  const riskLevel = riskLevelForScore(fraudScore, effectiveThresholds.scoreThresholds);
 
   // MEDIUM → 'OTP' is a label only: no OTP step exists, so CustomerAPI approves
   // the payment, raises an alert and keeps it OUT of the trusted baseline (L-01).
@@ -314,8 +359,9 @@ const checkFraud = ({
     recommendedAction: ACTION_MAP[riskLevel],
     estimatedLoss,
     signals,
+    breakdown,
+    rawScore,
   };
 };
 
-export { checkFraud };
-export default checkFraud;
+export { checkFraud, riskLevelForScore, defaultScoreThresholds };

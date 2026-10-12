@@ -37,8 +37,21 @@ describe('Navbar', () => {
     expect(store.getState().auth.isAuthenticated).toBe(false);
   });
 
-  it('F-04: when the logout request fails the user is still signed out locally but told the truth', async () => {
-    api.post.mockRejectedValueOnce(fail(503, 'Service unavailable'));
+  it.each([[401, 'Authentication required'], [403, 'Account has been deactivated'], [503, 'Service unavailable']])(
+    'E-01: an HTTP %i answer to the logout request still means signed out — no "could not be reached" toast',
+    async (status, message) => {
+      api.post.mockRejectedValueOnce(fail(status, message));
+      const { store } = renderBar();
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(await screen.findByText('login screen')).toBeInTheDocument();
+      expect(store.getState().auth).toMatchObject({ isAuthenticated: false, loading: false });
+      expect(toast.success).toHaveBeenCalledWith('Signed out');
+      expect(toast.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it('F-04: when the logout request gets NO answer the user is still signed out locally but told the truth', async () => {
+    api.post.mockRejectedValueOnce(Object.assign(new Error('Network Error'), { isAxiosError: true, code: 'ERR_NETWORK' }));
     const { store } = renderBar();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByText('login screen')).toBeInTheDocument();

@@ -4,6 +4,24 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 
+// T-06: eslint-plugin-react's `jsx-uses-vars` is not a dependency, so this tiny local rule does the
+// same job: a component used only in JSX (<Spinner />, <Foo.Bar />) counts as used. That lets
+// `no-unused-vars` run with the strict `^_` ignore pattern instead of the old blanket `^[A-Z_]`
+// (which hid genuinely unused imports of every capitalised name).
+const jsxUsesVars = {
+  meta: { type: 'problem', schema: [] },
+  create(context) {
+    const mark = (node, name) => context.sourceCode.markVariableAsUsed(name, node);
+    return {
+      JSXOpeningElement(node) {
+        let n = node.name;
+        while (n.type === 'JSXMemberExpression') n = n.object; // <Foo.Bar /> uses Foo
+        if (n.type === 'JSXIdentifier' && /^[A-Z]/.test(n.name)) mark(node, n.name); // lower-case = DOM tag
+      },
+    };
+  },
+};
+
 export default [
   { ignores: ['dist', 'coverage', 'node_modules'] },
   {
@@ -14,12 +32,13 @@ export default [
       globals: { ...globals.browser },
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
-    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
+    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh, local: { rules: { 'jsx-uses-vars': jsxUsesVars } } },
     rules: {
       ...js.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^_' }],
+      'local/jsx-uses-vars': 'error',
+      'no-unused-vars': ['error', { varsIgnorePattern: '^_', argsIgnorePattern: '^_' }],
     },
   },
   {

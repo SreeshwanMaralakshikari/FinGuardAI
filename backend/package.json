@@ -10,8 +10,11 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed:admin": "node seed/seedAdmin.js",
+    "db:sync-indexes": "node seed/syncIndexes.js",
+    "lint": "eslint .",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
-    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage"
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage",
+    "seed:demo": "node scripts/seedDemoData.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.0",
@@ -29,9 +32,14 @@
     "socket.io": "^4.8.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@jest/globals": "^30.5.2",
+    "eslint": "^9.0.0",
+    "globals": "^17.0.0",
     "jest": "^30.5.2",
     "mongodb-memory-server": "^11.3.0",
     "supertest": "^7.3.0"
-  }
+  },
+  "description": "FinGuardAI backend: Express 5 + Mongoose 9 API with a real-time fraud-scoring engine",
+  "license": "UNLICENSED"
 }

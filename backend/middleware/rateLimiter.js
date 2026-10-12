@@ -76,3 +76,17 @@ export const transactionLimiter = rateLimit({
   keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
   message: { success: false, message: 'Transaction rate limit exceeded. Please slow down.' },
 });
+
+/**
+ * simulationLimiter — applied to POST /admin-api/simulation/generate (A-08), AFTER validation so a malformed body
+ * costs nothing. Each call runs up to 100 payments through the real pipeline, so an admin gets 10 per hour
+ * (keyed by user id, falls back to IP).
+ */
+export const simulationLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
+  message: { success: false, message: 'Simulation rate limit exceeded (10 per hour). Please try again later.' },
+});

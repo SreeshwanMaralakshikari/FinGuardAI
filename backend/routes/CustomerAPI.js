@@ -3,26 +3,21 @@ import { verifyToken, authorizeRoles } from '../middleware/verifyToken.js';
 import { transactionLimiter, profileUpdateLimiter } from '../middleware/rateLimiter.js';
 import validate from '../middleware/validate.js';
 import asyncHandler from '../middleware/asyncHandler.js';
-import { parsePagination } from '../utils/pagination.js';
+import { parsePagination, buildPagination } from '../utils/pagination.js';
 import { submitTransactionRules } from '../validators/transactionValidators.js';
+import { customerAlertsQueryRules, customerTransactionsQueryRules, customerTimelineQueryRules } from '../validators/queryValidators.js';
 import uploadMiddleware, { requireImageContent } from '../middleware/uploadMiddleware.js';
-import { checkFraud } from '../services/fraudDetectionService.js';
-import { createWithSequentialId } from '../utils/generateSequentialId.js';
-import calcBehaviorProfile from '../utils/calcBehaviorProfile.js';
-import updateDeviceReputation from '../utils/updateDeviceReputation.js';
-import updateTrustScore from '../utils/updateTrustScore.js';
-import createNotification from '../utils/createNotification.js';
 import createAuditLog from '../utils/createAuditLog.js';
-import { withUserLock } from '../utils/userLock.js';
+import { processTransaction, buildTransactionResponse } from '../services/transactionService.js';
 import { buildDateRange } from '../utils/dateRange.js';
+import { OUTCOME_TITLES } from '../utils/caseWorkflow.js';
 import { formatRupees } from '../utils/normalize.js';
 import { uploadProfileImage, destroyImageByUrl } from '../utils/imageUpload.js';
-import { getIO } from '../utils/socketManager.js';
 import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
 import BehaviorProfileModel from '../models/BehaviorProfileModel.js';
+import NotificationModel from '../models/NotificationModel.js';
 import DeviceReputationModel from '../models/DeviceReputationModel.js';
-import SystemConfigModel from '../models/SystemConfigModel.js';
 import UserModel from '../models/UserModel.js';
 
 const router = express.Router();
@@ -30,234 +25,27 @@ const router = express.Router();
 // ── RBAC: all routes under /customer-api require CUSTOMER role ─────────────────
 router.use(verifyToken, authorizeRoles('CUSTOMER'));
 
-/**
- * Post-commit helpers must never turn an already-saved transaction into an HTTP
- * 500 (the customer would retry and pay twice): log and carry on (BE-5).
- */
-const bestEffort = async (label, fn) => {
-  try {
-    return await fn();
-  } catch (err) {
-    console.error(`[CustomerAPI] ${label} failed after the transaction was saved:`, err.message);
-    return null;
-  }
-};
-
-/** Keep only the known location fields (the validator already guarantees they are strings). */
-const pickLocation = (location) => {
-  const picked = {};
-  if (location?.city !== undefined) picked.city = location.city;
-  if (location?.country !== undefined) picked.country = location.country;
-  return picked;
-};
-
-/** One alert type per alert: the rule that fired, COMPOSITE when several different rules did. */
-const alertTypeFromSignals = (signals) => (signals.length === 1 ? signals[0] : 'COMPOSITE');
-
-// recommendedAction → transaction status.
-//   OTP is only a label: there is NO OTP step. MEDIUM is approved with an alert
-//   (notification to the customer) but is NOT learned as normal behaviour (L-01).
-const ACTION_TO_STATUS = { APPROVE: 'APPROVED', OTP: 'APPROVED', HOLD: 'HELD', BLOCK: 'BLOCKED' };
-
 // ── POST /customer-api/transactions ───────────────────────────────────────────
+// A-09: thin handler — validation here, the orchestration in services/transactionService.js.
+// C-01: an optional `Idempotency-Key` header makes a retry safe: the original result comes back
+// as 200 with `replayed: true` (first-time creation stays 201).
 router.post(
   '/transactions',
   transactionLimiter,
   submitTransactionRules,
   validate,
   asyncHandler(async (req, res) => {
-    const { amount, merchantName, merchantCategory, paymentMethod, deviceId } = req.body;
-    const location = pickLocation(req.body.location);
-    const userId = req.user._id;
-
-    // L-08 / N-28: one submission at a time PER USER. Velocity, trust score, device
-    // reputation and the behaviour profile are all read-then-write; overlapping
-    // requests of one user used to read the same snapshot (12 parallel payments → no
-    // velocity flag) and could write derived scores out of order.
-    const data = await withUserLock(userId, async () => {
-      // 1. Load live thresholds — never hardcode (D-P4-08)
-      //    AUD-18: .lean() — checkFraud merges thresholds with object spread; a
-      //    hydrated Mongoose document spreads as { $__, _doc, … }, so every admin
-      //    setting except highRiskMerchants was silently replaced by the defaults.
-      const thresholds = await SystemConfigModel.findOne({ singleton: 'system' }).lean();
-
-      // 2. Fetch behavioral context for fraud evaluation.
-      //    AUD-03: velocity is counted LIVE at check time. The stored
-      //    transactionVelocity is a snapshot from the customer's previous
-      //    transaction, so five purchases yesterday still read "5 in the last
-      //    hour" today. All outcomes count (a burst of blocked attempts is
-      //    velocity too). The current transaction is not saved yet, so the counts
-      //    are prior transactions only — consistent with the >= rule (C-P5-01).
-      const now = Date.now();
-      const [behaviorProfile, deviceReputation, txnsLastHour, txnsLastDay] = await Promise.all([
-        BehaviorProfileModel.findOne({ userId }).lean(),
-        DeviceReputationModel.findOne({ deviceId }).lean(),
-        TransactionModel.countDocuments({ userId, timestamp: { $gte: new Date(now - 60 * 60 * 1000) } }),
-        TransactionModel.countDocuments({ userId, timestamp: { $gte: new Date(now - 24 * 60 * 60 * 1000) } }),
-      ]);
-      const profileForCheck = {
-        ...(behaviorProfile ?? {}),
-        transactionVelocity: { perHour: txnsLastHour, perDay: txnsLastDay },
-      };
-
-      // 3. Build transaction input for the pure fraud service function
-      const transactionInput = {
-        amount,
-        merchantName,
-        merchantCategory: merchantCategory ?? 'GENERAL',
-        paymentMethod,
-        location,
-        deviceId,
-        userId,
-        timestamp: new Date(),
-      };
-
-      // 4. Run fraud detection — pure function, no DB side-effects (D-P4-05)
-      const { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals } = checkFraud({
-        transaction: transactionInput,
-        behaviorProfile: profileForCheck,
-        deviceReputation,
-        thresholds,
-      });
-
-      // 5. Map recommendedAction → transaction status
-      const status = ACTION_TO_STATUS[recommendedAction] ?? 'HELD';
-
-      // 6. Persist transaction together with its TXN-YYYY-NNNNN public ID in a
-      //    single insert (AUD-05 — replaces create-then-save, D-P4-07 revised)
-      const transaction = await createWithSequentialId(TransactionModel, 'publicId', 'TXN', {
-        userId,
-        amount,
-        merchantName,
-        merchantCategory: merchantCategory ?? 'GENERAL',
-        paymentMethod,
-        location,
-        deviceId,
-        ipAddress: req.ip,
-        fraudScore,
-        riskLevel,
-        reasons,
-        recommendedAction,
-        estimatedLoss,
-        status,
-      });
-
-      // 7. Public ID was assigned atomically at insert time (AUD-05)
-      const { publicId } = transaction;
-
-      // 8. MEDIUM+ risk: create FraudAlert and Customer notification.
-      //    Everything here runs after the transaction was saved, so all of it
-      //    (alert, audit entry, notification, socket event) is best-effort (BE-5).
-      let fraudAlert = null;
-      if (['MEDIUM', 'HIGH', 'CRITICAL'].includes(riskLevel)) {
-        // L-15: the type comes from the rules that fired, not from parsing reason text.
-        const alertType = alertTypeFromSignals(signals);
-
-        // The transaction is already saved: a failing alert insert must not turn
-        // the request into a 500 (the customer would retry and pay twice).
-        // Analysts can only open a case from an alert, so one retry is made before giving up
-        // (a HIGH / CRITICAL payment without an alert could not be reviewed or released).
-        const alertDoc = {
-          transactionId: transaction._id,
-          userId,
-          alertType,
-          riskLevel,
-          fraudScore,
-          reasons,
-          status: 'OPEN',
-        };
-        fraudAlert = await bestEffort('fraud alert creation', () => FraudAlertModel.create(alertDoc))
-          ?? await bestEffort('fraud alert creation (retry)', () => FraudAlertModel.create(alertDoc));
-
-        if (fraudAlert) {
-          await createAuditLog( // BS-19: alert creation is part of the audit trail
-            userId,
-            'CUSTOMER',
-            'FRAUD_ALERT_CREATED',
-            'FraudAlert',
-            fraudAlert._id.toString(),
-            { transactionId: publicId, alertType, riskLevel, fraudScore },
-            req.ip
-          );
-
-          await bestEffort('customer notification', () => createNotification({
-            recipientId: userId,
-            recipientRole: 'CUSTOMER',
-            type: 'FRAUD_ALERT',
-            title: `${riskLevel} Risk Transaction Detected`,
-            message: `Your transaction of ₹${formatRupees(amount)} at ${merchantName} was flagged. Fraud score: ${fraudScore}/100.`,
-            relatedEntityId: fraudAlert._id,
-            relatedEntityType: 'FRAUD_ALERT',
-          }));
-        }
-
-        // Push live event to admin WebSocket room (non-fatal — C-P4-03)
-        try {
-          getIO().emit('fraud_alert', {
-            transactionId: transaction._id,
-            publicId,
-            userId,
-            amount,
-            merchantName,
-            riskLevel,
-            fraudScore,
-            timestamp: transaction.timestamp,
-          });
-        } catch (_) { /* socket not yet initialized — non-fatal */ }
-      }
-
-      // 9. Update behavioral profile — only APPROVED + LOW-risk transactions teach
-      //    the trusted baseline (C-P4-01 revised by AUD-37 and L-01):
-      //      • HELD / BLOCKED are suspected fraud;
-      //      • MEDIUM is approved (no OTP step exists) but is suspicious by
-      //        definition — learning from it let an attacker's new device and
-      //        city become "usual" after one attempt.
-      //    updateDeviceReputation and updateTrustScore run for all outcomes (AUD-09).
-      //    The device lock keeps two customers who share a device from writing a
-      //    stale reputation over a fresher one (N-28).
-      const shouldUpdateBehaviorProfile = status === 'APPROVED' && riskLevel === 'LOW';
-      await Promise.all([
-        shouldUpdateBehaviorProfile
-          ? bestEffort('behaviour profile update', () => calcBehaviorProfile(userId, transaction))
-          : Promise.resolve(),
-        bestEffort('device reputation update', () =>
-          withUserLock(`device:${deviceId}`, () => updateDeviceReputation(deviceId, userId, transaction))),
-        bestEffort('trust score update', () => updateTrustScore(userId)),
-      ]);
-
-      // 10. Audit log
-      await createAuditLog(
-        userId,
-        'CUSTOMER',
-        'TRANSACTION_SUBMITTED',
-        'Transaction',
-        publicId,
-        { amount, merchantName, paymentMethod, riskLevel, fraudScore, status },
-        req.ip
-      );
-
-      return {
-        id: transaction._id,
-        publicId,
-        amount,
-        merchantName,
-        merchantCategory: transaction.merchantCategory,
-        paymentMethod,
-        fraudScore,
-        riskLevel,
-        reasons,
-        recommendedAction,
-        estimatedLoss,
-        status,
-        fraudAlert: fraudAlert ? { id: fraudAlert._id } : null,
-        timestamp: transaction.timestamp,
-      };
+    const { transaction, alert, replayed } = await processTransaction({
+      user: req.user,
+      payload: { ...req.body, idempotencyKey: req.get('Idempotency-Key') || undefined },
+      context: { ip: req.ip },
     });
 
-    res.status(201).json({
+    res.status(replayed ? 200 : 201).json({
       success: true,
       message: 'Transaction submitted successfully.',
-      data,
+      data: buildTransactionResponse(transaction, alert),
+      ...(replayed ? { replayed: true } : {}),
     });
   })
 );
@@ -265,6 +53,8 @@ router.post(
 // ── GET /customer-api/transactions ────────────────────────────────────────────
 router.get(
   '/transactions',
+  customerTransactionsQueryRules, // E-14
+  validate,
   asyncHandler(async (req, res) => {
     const { riskLevel, paymentMethod } = req.query;
     const { page, limit, skip } = parsePagination(req.query, 10); // AUD-21
@@ -277,22 +67,17 @@ router.get(
 
     const [transactions, total] = await Promise.all([
       TransactionModel.find(filter)
-        .sort({ timestamp: -1 })
+        .sort({ timestamp: -1, _id: -1 }) // C-06: stable paging when timestamps tie
         .skip(skip)
         .limit(Number(limit))
-        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore recommendedAction status timestamp'),
+        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore recommendedAction status timestamp scoreBreakdown'),
       TransactionModel.countDocuments(filter),
     ]);
 
     res.status(200).json({
       success: true,
       data: transactions,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit)),
-      },
+      pagination: buildPagination(page, limit, total),
     });
   })
 );
@@ -324,6 +109,8 @@ router.get(
 // ── GET /customer-api/fraud-alerts ────────────────────────────────────────────
 router.get(
   '/fraud-alerts',
+  customerAlertsQueryRules, // E-14
+  validate,
   asyncHandler(async (req, res) => {
     const { status, riskLevel } = req.query;
     const { page, limit, skip } = parsePagination(req.query, 10); // AUD-21
@@ -334,7 +121,7 @@ router.get(
 
     const [alerts, total] = await Promise.all([
       FraudAlertModel.find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ createdAt: -1, _id: -1 }) // C-06
         .skip(skip)
         .limit(Number(limit))
         .populate('transactionId', 'publicId amount merchantName paymentMethod timestamp status'),
@@ -344,12 +131,7 @@ router.get(
     res.status(200).json({
       success: true,
       data: alerts,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit)),
-      },
+      pagination: buildPagination(page, limit, total),
     });
   })
 );
@@ -368,6 +150,147 @@ router.get(
     }
 
     res.status(200).json({ success: true, data: alert });
+  })
+);
+
+// ── PATCH /customer-api/fraud-alerts/:id/acknowledge ──────────────────────────
+// F-02: "yes, that was me". Only the customer's OWN MEDIUM alert that is still OPEN (HIGH / CRITICAL belong to the
+// fraud team). ACKNOWLEDGED is not "open", so it drops out of every needs-attention count.
+router.patch(
+  '/fraud-alerts/:id/acknowledge',
+  asyncHandler(async (req, res) => {
+    const alert = await FraudAlertModel.findOne({ _id: req.params.id, userId: req.user._id });
+    if (!alert) {
+      return res.status(404).json({ success: false, message: 'Fraud alert not found.' });
+    }
+    if (alert.riskLevel !== 'MEDIUM') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only MEDIUM risk alerts can be acknowledged. HIGH and CRITICAL alerts are reviewed by our fraud team.',
+      });
+    }
+    if (alert.status !== 'OPEN') {
+      return res.status(400).json({
+        success: false,
+        message: `This alert is already ${alert.status.toLowerCase()}; only open alerts can be acknowledged.`,
+      });
+    }
+
+    // Conditional write: two simultaneous taps acknowledge once, the loser gets the 400 above.
+    const updated = await FraudAlertModel.findOneAndUpdate(
+      { _id: alert._id, userId: req.user._id, riskLevel: 'MEDIUM', status: 'OPEN' },
+      { $set: { status: 'ACKNOWLEDGED' } },
+      { returnDocument: 'after' }
+    );
+    if (!updated) {
+      return res.status(400).json({ success: false, message: 'This alert is no longer open.' });
+    }
+
+    const populated = await FraudAlertModel.findById(updated._id).populate('transactionId');
+    await createAuditLog(
+      req.user._id,
+      'CUSTOMER',
+      'ALERT_ACKNOWLEDGED',
+      'FraudAlert',
+      updated._id.toString(),
+      { transactionId: populated?.transactionId?.publicId ?? null, riskLevel: updated.riskLevel, previousStatus: 'OPEN' },
+      req.ip
+    );
+
+    res.status(200).json({ success: true, message: 'Alert acknowledged.', data: populated ?? updated });
+  })
+);
+
+// ── GET /customer-api/timeline ────────────────────────────────────────────────
+// A-02: one newest-first activity feed built from the customer's own transactions, fraud alerts and
+// case-outcome notices. Each source is cut to `limit` before merging (so a feed never reads more than
+// 3 × limit rows), then the merge is cut to `limit`. Only customer-visible fields are used: no case notes,
+// no analyst names or ids.
+const TIMELINE_DEFAULT_LIMIT = 50;
+const OUTCOME_TITLE_LIST = Object.values(OUTCOME_TITLES);
+const OUTCOME_STATUS_BY_TITLE = Object.fromEntries(Object.entries(OUTCOME_TITLES).map(([status, title]) => [title, status]));
+const STATUS_WORDS = { APPROVED: 'approved', HELD: 'held for review', BLOCKED: 'blocked' };
+
+router.get(
+  '/timeline',
+  customerTimelineQueryRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const limit = req.query.limit ? Number(req.query.limit) : TIMELINE_DEFAULT_LIMIT;
+    const userId = req.user._id;
+
+    const [transactions, alerts, outcomes] = await Promise.all([
+      TransactionModel.find({ userId })
+        .sort({ timestamp: -1, _id: -1 })
+        .limit(limit)
+        .select('publicId amount merchantName paymentMethod riskLevel status timestamp')
+        .lean(),
+      FraudAlertModel.find({ userId })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit)
+        .select('transactionId riskLevel status reasons createdAt')
+        .populate('transactionId', 'publicId amount merchantName')
+        .lean(),
+      NotificationModel.find({ recipientId: userId, recipientRole: 'CUSTOMER', type: 'FRAUD_ALERT', title: { $in: OUTCOME_TITLE_LIST } })
+        .sort({ createdAt: -1, _id: -1 })
+        .limit(limit)
+        .select('title message relatedEntityId createdAt')
+        .lean(),
+    ]);
+
+    // outcome notices point at the alert; one lookup gives their transaction (own alerts only)
+    const outcomeAlerts = outcomes.length > 0
+      ? await FraudAlertModel.find({ _id: { $in: outcomes.map((n) => n.relatedEntityId) }, userId })
+        .select('transactionId riskLevel')
+        .populate('transactionId', 'publicId amount')
+        .lean()
+      : [];
+    const alertById = new Map(outcomeAlerts.map((a) => [String(a._id), a]));
+
+    const events = [
+      ...transactions.map((t) => ({
+        id: `txn-${t._id}`,
+        type: 'TRANSACTION',
+        timestamp: t.timestamp,
+        title: `Payment to ${t.merchantName}`,
+        description: `₹${formatRupees(t.amount)} by ${t.paymentMethod.replace('_', ' ')} - ${STATUS_WORDS[t.status] ?? t.status.toLowerCase()}.`,
+        riskLevel: t.riskLevel ?? null,
+        status: t.status ?? null,
+        amount: t.amount,
+        transactionId: t.publicId ?? null,
+      })),
+      ...alerts.map((a) => ({
+        id: `alert-${a._id}`,
+        type: 'ALERT',
+        timestamp: a.createdAt,
+        title: `${a.riskLevel} risk alert`,
+        description: a.reasons?.[0] ?? 'This payment was flagged for review.',
+        riskLevel: a.riskLevel,
+        status: a.status,
+        amount: a.transactionId?.amount ?? null,
+        transactionId: a.transactionId?.publicId ?? null,
+      })),
+      ...outcomes.map((n) => {
+        const alert = alertById.get(String(n.relatedEntityId));
+        return {
+          id: `outcome-${n._id}`,
+          type: 'CASE_OUTCOME',
+          timestamp: n.createdAt,
+          title: n.title,
+          description: n.message,
+          riskLevel: alert?.riskLevel ?? null,
+          status: OUTCOME_STATUS_BY_TITLE[n.title] ?? null, // DISMISSED = cleared, RESOLVED = fraud confirmed
+          amount: alert?.transactionId?.amount ?? null,
+          transactionId: alert?.transactionId?.publicId ?? null,
+        };
+      }),
+    ]
+      .map((event) => ({ ...event, timestamp: new Date(event.timestamp) }))
+      .sort((a, b) => b.timestamp - a.timestamp || (a.id < b.id ? 1 : -1))
+      .slice(0, limit)
+      .map((event) => ({ ...event, timestamp: event.timestamp.toISOString() }));
+
+    res.status(200).json({ success: true, data: events });
   })
 );
 

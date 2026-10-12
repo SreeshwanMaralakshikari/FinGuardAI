@@ -9,9 +9,13 @@
  *   6. listen() on process.env.PORT (Render injects it)
  *   7. Graceful shutdown on SIGTERM/SIGINT (Render sends SIGTERM on every
  *      deploy and may restart free instances at any time)
- *   8. Fatal errors (uncaught exception / unhandled rejection) are logged and
- *      trigger the same graceful shutdown with exit code 1 — Render then
- *      restarts the service from a clean state
+ *   8. An uncaught exception is logged and triggers the same graceful shutdown
+ *      with exit code 1 — Render then restarts the service from a clean state.
+ *      An unhandled promise rejection is only logged (C-03): the server keeps
+ *      running (utils/processHandlers.js)
+ *   9. After connecting, every model's indexes are awaited and failures logged
+ *      (E-17, config/db.js ensureIndexes) — the server still starts. On an existing database
+ *      run `npm run db:sync-indexes` once after an upgrade (OPS: new unique / TTL indexes, dropped indexes)
  * @phase Phase 2 spec → Phase 9 (production implementation)
  */
 import './config/loadEnv.js'; // ⚠️ keep first — see config/loadEnv.js
@@ -20,11 +24,13 @@ import http from 'node:http';
 import { Server } from 'socket.io';
 
 import validateEnv from './config/validateEnv.js';
-import connectDB, { disconnectDB } from './config/db.js';
+import { describeEnvironment } from './config/environment.js';
+import connectDB, { disconnectDB, ensureIndexes } from './config/db.js';
 import { corsOptions, isOriginAllowed } from './config/corsOptions.js';
 import app from './app.js';
 import { setIO, userRoom, roleRoom } from './utils/socketManager.js';
 import { socketAuthMiddleware } from './utils/socketAuth.js';
+import { registerProcessErrorHandlers } from './utils/processHandlers.js';
 
 const PORT = Number(process.env.PORT) || 5000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -122,6 +128,7 @@ const shutdown = (reason, exitCode = 0) => {
 const start = async () => {
   validateEnv();
   await connectDB();
+  await ensureIndexes(); // E-17: log index-build failures (e.g. duplicate data under a unique index); never exits
 
   httpServer = http.createServer(app);
 
@@ -135,22 +142,15 @@ const start = async () => {
   setIO(io);
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] FinGuardAI API listening on port ${PORT} (${process.env.NODE_ENV ?? 'development'})`);
+    console.log(`[Server] FinGuardAI API listening on port ${PORT} (${describeEnvironment()})`);
   });
 };
 
 process.on('SIGTERM', () => shutdown('SIGTERM received'));
 process.on('SIGINT', () => shutdown('SIGINT received'));
 
-// Unknown state after these — log with stack, then restart cleanly.
-process.on('unhandledRejection', (reason) => {
-  console.error('[Server] Unhandled promise rejection:', reason);
-  shutdown('Unhandled promise rejection', 1);
-});
-process.on('uncaughtException', (err) => {
-  console.error('[Server] Uncaught exception:', err);
-  shutdown('Uncaught exception', 1);
-});
+// C-03: an unhandled rejection is logged and ignored; an uncaught exception (unknown state) restarts cleanly.
+registerProcessErrorHandlers(process, shutdown);
 
 start().catch((err) => {
   console.error('[Server] Failed to start:', err.message);

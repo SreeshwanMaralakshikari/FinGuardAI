@@ -1,21 +1,24 @@
 // tests/admin.test.js — AdminAPI: users, thresholds (C-P4-02), simulation, audit logs, analytics
 import { beforeAll, afterAll, beforeEach, afterEach, describe, it, expect, jest } from '@jest/globals';
 import { connectTestDB, disconnectTestDB, clearCollections } from './setup.js';
-import { seedUser, seedAdmin } from './helpers/seedUser.js';
+import { seedUser, seedAdmin, uniqueEmail } from './helpers/seedUser.js';
 import { seedConfig } from './helpers/seedConfig.js';
 import { loginAgent } from './helpers/authAgent.js';
 import { seedTransaction } from './helpers/seedTransaction.js';
 import SystemConfigModel from '../models/SystemConfigModel.js';
+import TransactionModel from '../models/TransactionModel.js';
 import AuditLogModel from '../models/AuditLogModel.js';
 import { setIO, hashToken, userRoom } from '../utils/socketManager.js';
 import { getZonedParts, zonedTimeToUtc } from '../config/timeZone.js';
+import { freezeClock, unfreezeClock } from './helpers/frozenClock.js';
 
 beforeAll(connectTestDB);
 afterAll(disconnectTestDB);
 beforeEach(async () => { await clearCollections(); await seedConfig(); });
+afterEach(() => unfreezeClock()); // T-04: tests that freezeClock() never leak a fake clock
 
 async function admin() {
-  const { user, password } = await seedAdmin({ email: `admin${Date.now()}@test.com` });
+  const { user, password } = await seedAdmin({ email: uniqueEmail('admin') });
   return loginAgent(user.email, password);
 }
 
@@ -109,7 +112,7 @@ describe('Round-3 audit fixes (admin analytics)', () => {
     const agent = await admin();
     const { user, password } = await seedUser({ email: 'kpi@test.com' });
     const cust = await loginAgent(user.email, password);
-    const casino = { amount: 500, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'k1' };
+    const casino = { amount: 500, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'k1', location: { city: 'Mumbai', country: 'IN' } };
     await cust.post('/customer-api/transactions').send(casino);                     // MEDIUM (OTP → APPROVED)
     await cust.post('/customer-api/transactions').send({ ...casino, amount: 60000 }); // HIGH
     expect((await agent.get('/admin-api/analytics')).body.data.openAlerts).toBe(1);
@@ -128,22 +131,23 @@ describe('Simulation, audit logs, analytics', () => {
   });
 
   it('analytics reports hours in Asia/Kolkata (AUD-06)', async () => {
+    freezeClock(); // T-04: 2026-03-10 14:00 IST — the hour / day below are constants, not "now" computed at assertion time (reset in afterEach)
     const agent = await admin();
     const { user, password } = await seedUser({ email: 'an-cust@test.com' });
     const cust = await loginAgent(user.email, password);
-    await cust.post('/customer-api/transactions').send({ amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'd1' });
+    await cust.post('/customer-api/transactions').send({ amount: 60000, merchantName: 'Casino Royal', merchantCategory: 'CASINO', paymentMethod: 'UPI', deviceId: 'd1', location: { city: 'Mumbai', country: 'IN' } });
+    // The schema default `timestamp: Date.now` keeps a reference to the real clock, so pin the stored time to the frozen one.
+    await TransactionModel.updateMany({}, { $set: { timestamp: new Date() } });
     const res = await agent.get('/admin-api/analytics');
     expect(res.status).toBe(200);
-    const istHour = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: 'Asia/Kolkata' }).format(new Date()));
-    expect(res.body.data.fraudByHour.map((h) => h.hour)).toContain(istHour);
+    expect(res.body.data.fraudByHour.map((h) => h.hour)).toContain(14);
     expect(res.body.data.totalTransactions).toBe(1);
     const trends = await agent.get('/admin-api/analytics/trends');
     expect(trends.status).toBe(200);
     // AUD-26: every IST day of the 30-day window is present (zero-filled)
     const { dailyTrend } = trends.body.data;
     expect(dailyTrend.length).toBeGreaterThanOrEqual(30);
-    const todayIST = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-    expect(dailyTrend.at(-1)).toMatchObject({ date: todayIST, count: 1, movingAvg: 0.14 }); // 1 fraud in 7 days
+    expect(dailyTrend.at(-1)).toMatchObject({ date: '2026-03-10', count: 1, movingAvg: 0.14 }); // 1 fraud in 7 days
     expect(dailyTrend.filter((d) => d.count > 0)).toHaveLength(1);
   });
 });
@@ -323,6 +327,7 @@ describe('L-05 / N-14 admin date handling', () => {
   });
 
   it('trends: the window is 31 whole IST days starting at IST midnight 30 days ago; peak hours use the same window', async () => {
+    freezeClock(); // T-04: the 31-day window is anchored to a fixed 'now'
     const agent = await admin();
     const { user } = await seedUser({ email: 'trend@test.com' });
     const today = getZonedParts(new Date());
@@ -340,7 +345,7 @@ describe('L-05 / N-14 admin date handling', () => {
     const firstDay = istDay(new Date(windowStart.getTime() + 12 * 3600_000));
     expect(dailyTrend[0].date).toBe(firstDay);
     expect(dailyTrend[0].count).toBe(1);
-    expect(dailyTrend.at(-1).date).toBe(istDay(new Date()));
+    expect(dailyTrend.at(-1).date).toBe('2026-03-10');
     expect(dailyTrend.reduce((sum, d) => sum + d.count, 0)).toBe(1);
     expect(peakFraudHours).toEqual([{ hour: 1, count: 1 }]); // only the in-window transaction (01:00 IST); the others were all-time before
     // dates are consecutive calendar days

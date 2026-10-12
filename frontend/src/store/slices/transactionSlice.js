@@ -18,7 +18,7 @@
  *     Submit: { success, data: <flat transaction summary> }  ← FLAT, no sub-keys (C-P6-33)
  *             Fields: id, publicId, amount, merchantName, merchantCategory, paymentMethod,
  *                     fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss,
- *                     status, fraudAlert, timestamp
+ *                     status, fraudAlert, timestamp, scoreBreakdown (B-01), replayed? (C-01, only when true)
  * @phase Phase 6 — Frontend Foundation
  * @decision D-P6-04, D-P6-23
  */
@@ -98,16 +98,26 @@ export const fetchTransactionByIdThunk = createAsyncThunk(
  * Submit a new transaction for fraud evaluation.
  * Phase 4 response: { success, data: <flat transaction summary> }  ← FLAT (C-P6-33)
  * action.payload = data.data = flat object (id, publicId, amount, fraudScore, status, etc.)
- * @param {Object} transactionPayload
+ * C-01: `idempotencyKey` (optional, taken out of the body) is sent as the `Idempotency-Key` header,
+ * so a retry after a timeout cannot create a second payment.
+ * A rejection without an HTTP response (timeout / offline) carries `meta.noResponse: true`: the
+ * server may still have saved the payment, so the page tells the user to check the history.
+ * @param {Object} transactionPayload  body fields, plus optional `idempotencyKey`
  */
 export const submitTransactionThunk = createAsyncThunk(
   'transactions/submit',
-  async (transactionPayload, { rejectWithValue }) => {
+  async ({ idempotencyKey, ...body } = {}, { rejectWithValue }) => {
     try {
-      const { data } = await api.post(API_PATHS.CUSTOMER.SUBMIT_TRANSACTION, transactionPayload);
-      return data.data; // C-P6-17: was `return data`
+      const { data } = await api.post(
+        API_PATHS.CUSTOMER.SUBMIT_TRANSACTION,
+        body,
+        ...(idempotencyKey ? [{ headers: { 'Idempotency-Key': idempotencyKey } }] : []),
+      );
+      // C-01: 200 + top-level `replayed: true` = this Idempotency-Key was already used; `data` is the
+      // ORIGINAL result. Success, flagged on the (still flat) payload so the page can add a note.
+      return data.replayed === true ? { ...data.data, replayed: true } : data.data; // C-P6-17: was `return data`
     } catch (err) {
-      return rejectWithValue(getErrorMessage(err, 'Transaction submission failed'));
+      return rejectWithValue(getErrorMessage(err, 'Transaction submission failed'), { noResponse: !err?.response });
     }
   },
 );

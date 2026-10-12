@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CASE_STATUSES } from '../utils/enums.js';
 
 const { Schema } = mongoose;
 
@@ -50,7 +51,7 @@ const fraudCaseSchema = new Schema(
     status: {
       type: String,
       enum: {
-        values: ['OPEN', 'ASSIGNED', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED'],
+        values: [...CASE_STATUSES],
         message: 'Case status must be OPEN, ASSIGNED, UNDER_REVIEW, RESOLVED, or DISMISSED',
       },
       default: 'OPEN',

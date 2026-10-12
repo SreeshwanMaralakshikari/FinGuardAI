@@ -7,7 +7,9 @@
  *            error, detailError, flaggedError, flaggedDetailError, + one *RequestId per thunk }
  *   N-02 / N-03: every thunk has its own loading flag and (for fetches) its own error string,
  *   cleared on pending; only the latest request of a thunk may write its result.
- *   CUSTOMER thunks: fetchFraudAlertsThunk, fetchFraudAlertByIdThunk (/customer-api)
+ *   CUSTOMER thunks: fetchFraudAlertsThunk, fetchFraudAlertByIdThunk, acknowledgeAlertThunk (/customer-api)
+ *     F-02: acknowledgeAlertThunk PATCHes /fraud-alerts/:id/acknowledge (MEDIUM + OPEN only) and replaces
+ *     the alert in `alerts` / `selectedAlert` with the answer (status ACKNOWLEDGED).
  *   ANALYST thunks (AUD-13, Phase 2 spec "fetchFlaggedTransactionsThunk (analyst view)"):
  *     fetchFlaggedTransactionsThunk     → GET /analyst-api/flagged-transactions
  *     fetchFlaggedTransactionByIdThunk  → GET /analyst-api/flagged-transactions/:id
@@ -102,6 +104,23 @@ export const fetchFraudAlertByIdThunk = createAsyncThunk(
       return data.data; // C-P6-19: was data.alert (undefined)
     } catch (err) {
       return rejectWithValue(getErrorMessage(err, 'Alert not found'));
+    }
+  },
+);
+
+/**
+ * F-02: the customer confirms a MEDIUM alert ("I recognise this payment").
+ * Response: { success, message, data: <populated alert, status 'ACKNOWLEDGED'> }; 400 when not MEDIUM / not open.
+ * @param {string} id — alert _id
+ */
+export const acknowledgeAlertThunk = createAsyncThunk(
+  'fraudAlerts/acknowledge',
+  async (id, { rejectWithValue }) => {
+    try {
+      const { data } = await api.patch(`${API_PATHS.CUSTOMER.ALERT_BY_ID}/${id}/${API_PATHS.CUSTOMER.ALERT_ACK_SUFFIX}`);
+      return data.data;
+    } catch (err) {
+      return rejectWithValue(getErrorMessage(err, 'Could not acknowledge the alert'));
     }
   },
 );
@@ -223,6 +242,14 @@ const fraudAlertSlice = createSlice({
         state.detailError     = rejectedMessage(action, 'Alert not found');
       });
 
+    // F-02: the answer is the updated alert; swap it in wherever the page holds that alert
+    builder.addCase(acknowledgeAlertThunk.fulfilled, (state, action) => {
+      const updated = action.payload;
+      if (!updated?._id) return;
+      state.alerts = state.alerts.map((a) => (a._id === updated._id ? { ...a, ...updated } : a));
+      if (state.selectedAlert?._id === updated._id) state.selectedAlert = { ...state.selectedAlert, ...updated };
+    });
+
     // Analyst: flagged list + detail (AUD-13)
     builder
       .addCase(fetchFlaggedTransactionsThunk.pending, (state, action) => {
@@ -266,13 +293,13 @@ const fraudAlertSlice = createSlice({
         state.flaggedDetailError     = rejectedMessage(action, 'Transaction not found');
       });
 
-    // FE-fix: opening a case changes the alert (REVIEWED) and fills existingCase;
-    // keep the investigation context in step so the page cannot create a 2nd case.
+    // FE-fix: opening a case fills existingCase; keep the investigation context in step so the page
+    // cannot create a 2nd case. B-04: the alert STAYS as it is (OPEN) — the backend only moves it
+    // to REVIEWED / DISMISSED when the case is RESOLVED / DISMISSED.
     builder.addCase(createCaseThunk.fulfilled, (state, action) => {
       const c = action.payload;
       const sel = state.selectedFlagged;
       if (sel?.fraudAlert && c && sel.fraudAlert._id === (c.fraudAlertId?._id ?? c.fraudAlertId)) {
-        sel.fraudAlert.status = 'REVIEWED';
         sel.existingCase = {
           _id: c._id, publicId: c.publicId, status: c.status,
           assignedAnalystId: c.assignedAnalystId ?? null, openedAt: c.openedAt,

@@ -84,6 +84,9 @@ export const loginThunk = createAsyncThunk(
 
 /**
  * Logout — clears server-side session (cookie cleared by Set-Cookie header).
+ * E-01: ANY HTTP response means the server answered (a deactivated user's logout used to come
+ * back 403, an expired one 401), so the thunk fulfils and the client is signed out cleanly.
+ * Only a request that got no response at all is rejected — the server cookie may still be valid.
  */
 export const logoutThunk = createAsyncThunk(
   'auth/logout',
@@ -92,6 +95,7 @@ export const logoutThunk = createAsyncThunk(
     try {
       await api.post(API_PATHS.AUTH.LOGOUT);
     } catch (err) {
+      if (err?.response) return undefined;
       return rejectWithValue(getErrorMessage(err, 'Logout failed'));
     }
   },

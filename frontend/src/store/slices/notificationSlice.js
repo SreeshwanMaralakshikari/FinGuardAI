@@ -1,7 +1,7 @@
 /**
  * @file src/store/slices/notificationSlice.js
  * @description Redux slice for user notification state (CUSTOMER + ANALYST only).
- *   State: { notifications[], unreadCount, loading, error, listRequestId }
+ *   State: { notifications[], unreadCount, loading, error, listRequestId, panelOpen }
  *   N-02 / N-03: a failed list fetch is kept in `error` (cleared on pending); only the latest
  *   list request may write its result.
  *   Live action: addLiveNotification (dispatched by useNotifications on 'new-notification' event)
@@ -25,7 +25,11 @@ const initialState = {
   loading:       false,
   error:         '',
   listRequestId: null,
+  panelOpen:     false, // F-01: the bell panel is open → a socket reconnect should refresh its list
 };
+
+/** F-07: live pushes stay bounded while the panel is closed (the server list is the source of truth). */
+export const MAX_LIVE_NOTIFICATIONS = 50;
 
 // ─── Thunks ───────────────────────────────────────────────────────────────────
 
@@ -105,6 +109,11 @@ const notificationSlice = createSlice({
       const payload = action.payload ?? {};
       state.notifications.unshift({ ...payload, _id: payload._id ?? payload.id });
       state.unreadCount += 1;
+      if (state.notifications.length > MAX_LIVE_NOTIFICATIONS) state.notifications.splice(MAX_LIVE_NOTIFICATIONS);
+    },
+    /** F-01: NotificationPanel reports whether it is open. */
+    setPanelOpen(state, action) {
+      state.panelOpen = Boolean(action.payload);
     },
   },
   extraReducers: (builder) => {
@@ -151,5 +160,5 @@ const notificationSlice = createSlice({
   },
 });
 
-export const { addLiveNotification } = notificationSlice.actions;
+export const { addLiveNotification, setPanelOpen } = notificationSlice.actions;
 export default notificationSlice.reducer;

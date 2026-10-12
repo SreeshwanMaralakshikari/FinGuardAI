@@ -8,6 +8,7 @@
 // real database). Pasting a production URI into MONGO_URI_TEST fails fast.
 import mongoose from 'mongoose';
 import { getMongoDbName } from '../config/mongoUri.js';
+import { resetLoginThrottle } from '../utils/loginThrottle.js';
 
 let mongod = null;
 
@@ -45,14 +46,33 @@ export async function connectTestDB() {
     mongod = await MongoMemoryServer.create();
     uri = mongod.getUri();
   }
-  await mongoose.connect(uri);
+  await mongoose.connect(uri, { autoIndex: false }); // indexes are built explicitly below
   try {
     assertSafeTestDatabase(mongoose.connection.name, productionDbName()); // authoritative: the name actually in use
   } catch (err) {
     await mongoose.disconnect();
     throw err;
   }
-  await Promise.all(Object.values(mongoose.models).map((m) => m.init())); // build unique indexes before tests
+  // The FerretDB stand-in used in some sandboxes cannot build PARTIAL indexes or TTL indexes (real MongoDB / Atlas /
+  // mongodb-memory-server can). Partial ones are left out there; TTL ones (C-04) are built as plain indexes on the same
+  // key. Everything else is built as usual. The TTL definitions themselves are asserted on the schema (round2b tests).
+  // Their behaviour is covered by the lock-based tests; the DB-level backstop test skips itself (see tests/helpers/dbAtomicity.js).
+  const emulated = Boolean((await mongoose.connection.db.admin().command({ buildInfo: 1 }).catch(() => ({}))).ferretdbVersion);
+  const original = new Map();
+  if (emulated) {
+    for (const model of Object.values(mongoose.models)) {
+      original.set(model, model.schema._indexes);
+      model.schema._indexes = model.schema._indexes
+        .filter(([, options]) => !options?.partialFilterExpression)
+        .map(([fields, options]) => {
+          if (options?.expireAfterSeconds === undefined) return [fields, options];
+          const { expireAfterSeconds: _ttl, ...plain } = options;
+          return [fields, plain];
+        });
+    }
+  }
+  await Promise.all(Object.values(mongoose.models).map((m) => m.createIndexes())); // build unique indexes before tests
+  for (const [model, indexes] of original) model.schema._indexes = indexes; // the schema itself stays as declared
 }
 
 export async function disconnectTestDB() {
@@ -65,6 +85,7 @@ export async function disconnectTestDB() {
 
 export async function clearCollections() {
   assertSafeTestDatabase(mongoose.connection.name, productionDbName());
+  resetLoginThrottle(); // D-02: the per-account login throttle is process memory; every test starts without failures
   const { collections } = mongoose.connection;
   await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));
 }

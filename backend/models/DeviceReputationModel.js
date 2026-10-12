@@ -52,7 +52,7 @@ const deviceReputationSchema = new Schema(
 
 // ── Indexes ───────────────────────────────────────────────────────────────────
 // deviceId is indexed automatically via unique: true.
-deviceReputationSchema.index({ reputationScore: 1 });
+// C-05: the {reputationScore} index was dropped — nothing queries or sorts by it (deviceId is unique-indexed).
 
 const DeviceReputationModel = mongoose.model('DeviceReputation', deviceReputationSchema);
 

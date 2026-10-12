@@ -19,8 +19,8 @@ export const isValidEmail = (value) =>
   typeof value === 'string' && value.length <= 254 && EMAIL_RE.test(value.trim());
 
 /** Name rule shared by Register and Profile: 2–100 characters after trimming. */
-export const NAME_MIN = 2;
-export const NAME_MAX = 100;
+const NAME_MIN = 2;
+const NAME_MAX = 100;
 /** @param {unknown} value @returns {true|string} RHF `validate` result */
 export const validateName = (value) => {
   const len = String(value ?? '').trim().length;
@@ -35,7 +35,7 @@ export const validateName = (value) => {
  * (non-English characters take 2–4 bytes each). RHF `validate` rule.
  * @param {unknown} value @returns {true|string}
  */
-export const PASSWORD_MAX_BYTES = 72;
+const PASSWORD_MAX_BYTES = 72;
 export const validatePasswordBytes = (value) => {
   const text = String(value ?? '');
   if (new TextEncoder().encode(text).length <= PASSWORD_MAX_BYTES) return true;

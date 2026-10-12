@@ -18,7 +18,7 @@
  *   - formatCurrency()     — ₹ Indian Rupee, en-IN locale
  *   - formatDate()         — "07 Sept 2026, 10:30 am" Asia/Kolkata
  *   - formatDateShort()    — "07 Sept 2026"
- *   - truncate()           — truncate string to n characters
+ *   - cityLabel() / formatLocation() — city text with an explicit "Unknown location" (F-10)
  *   - getInitials()        — "Sreeshwan M" → "SM"
  *
  * @phase Phase 6 — Frontend Foundation
@@ -149,7 +149,7 @@ export const INPUT = Object.freeze({
 // ─── Table ────────────────────────────────────────────────────────────────────
 
 export const TABLE = Object.freeze({
-  wrapper: 'overflow-x-auto rounded-xl border border-gray-200',
+  wrapper: 'relative overflow-x-auto rounded-xl border border-gray-200', // relative: the sr-only header span must not escape the scroll box (page-level scroll at 375px)
   table:   'min-w-full divide-y divide-gray-200',
   thead:   'bg-gray-50',
   th:      'px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider',
@@ -160,7 +160,7 @@ export const TABLE = Object.freeze({
 
 // ─── Badge ────────────────────────────────────────────────────────────────────
 
-export const BADGE = Object.freeze({
+const BADGE = Object.freeze({
   base: 'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold border',
 });
 
@@ -214,15 +214,18 @@ export function formatDateShort(isoDate) {
   }).format(new Date(isoDate));
 }
 
-/**
- * Truncate a string to n characters, appending "…" if truncated.
- * @param {string} str
- * @param {number} [n=60]
- * @returns {string}
- */
-export function truncate(str, n = 60) {
-  if (!str) return '';
-  return str.length > n ? `${str.slice(0, n)}…` : str;
+/** F-10: what is shown for a transaction whose city is missing (older data) or "Unknown". */
+export const UNKNOWN_LOCATION = 'Unknown location';
+
+/** @param {unknown} city @returns {string} the city, or UNKNOWN_LOCATION when blank / "Unknown" */
+export function cityLabel(city) {
+  const c = String(city ?? '').trim();
+  return !c || c.toLowerCase() === 'unknown' ? UNKNOWN_LOCATION : c;
+}
+
+/** @param {{ city?: string, country?: string }} [location] @returns {string} "Mumbai, IN" / "Unknown location" */
+export function formatLocation(location) {
+  return [cityLabel(location?.city), String(location?.country ?? '').trim()].filter(Boolean).join(', ');
 }
 
 /**
@@ -257,7 +260,7 @@ export function badgeClass(colorEntry) {
 export const WAKE_GATE = Object.freeze({
   screen:   'flex min-h-screen items-center justify-center bg-gray-50 px-4',
   card:     'w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 text-center shadow-sm',
-  spinner:  'mx-auto mb-5 h-10 w-10 animate-spin rounded-full border-4 border-primary-600 border-t-transparent',
+  spinner:  'mx-auto mb-5 h-10 w-10 animate-spin motion-reduce:animate-none rounded-full border-4 border-primary-600 border-t-transparent',
   title:    'text-lg font-semibold text-gray-900',
   text:     'mt-2 text-sm text-gray-600',
   meta:     'mt-4 text-xs font-medium text-gray-500',

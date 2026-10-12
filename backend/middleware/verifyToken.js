@@ -14,14 +14,20 @@ import { getClearAuthCookieOptions } from '../config/cookieOptions.js';
  *   • with iatMs:    revoked  ⇔ iatMs ≤ changedAt            (ms precision)
  *   • without iatMs: revoked  ⇔ iat·1000 ≤ changedAt          (older tokens; a token
  *     minted in the same second as the change is treated as "before" — safe side)
- * @param {{ passwordChangedAt?: Date|null }} user
+ *
+ * C-09: `sessionsRevokedAt` (set when an admin deactivates the account) works the
+ * same way, so a cookie stolen before a deactivation does not come back to life
+ * when the account is re-activated. The later of the two instants applies.
+ * @param {{ passwordChangedAt?: Date|null, sessionsRevokedAt?: Date|null }} user
  * @param {{ iat?: number, iatMs?: number }} decoded  verified JWT payload
  */
 export const isTokenRevoked = (user, decoded) => {
-  if (!user?.passwordChangedAt) return false;
-  const changedAt = new Date(user.passwordChangedAt).getTime();
+  const cutoffs = [user?.passwordChangedAt, user?.sessionsRevokedAt]
+    .filter(Boolean)
+    .map((date) => new Date(date).getTime());
+  if (cutoffs.length === 0) return false;
   const issuedAt = Number.isFinite(decoded?.iatMs) ? decoded.iatMs : (decoded?.iat ?? 0) * 1000;
-  return issuedAt <= changedAt;
+  return issuedAt <= Math.max(...cutoffs);
 };
 
 /**
@@ -40,9 +46,9 @@ const createVerifyToken = ({ clearCookieOnFailure = false } = {}) =>
       return res.status(401).json({ success: false, message: 'Authentication required. Please log in.' });
     }
 
-    const reject = (status, message) => {
+    const reject = (status, message, code) => {
       if (clearCookieOnFailure) res.clearCookie('token', getClearAuthCookieOptions());
-      return res.status(status).json({ success: false, message });
+      return res.status(status).json({ success: false, message, ...(code ? { code } : {}) });
     };
 
     let decoded;
@@ -52,15 +58,19 @@ const createVerifyToken = ({ clearCookieOnFailure = false } = {}) =>
       return reject(401, 'Session expired. Please log in again.');
     }
 
-    const user = await UserModel.findById(decoded.id).select('-password +passwordChangedAt');
+    const user = await UserModel.findById(decoded.id).select('-password +passwordChangedAt +sessionsRevokedAt');
     if (!user) {
       return reject(401, 'User account not found.');
     }
-    if (isTokenRevoked(user, decoded)) { // AUD-23: password changed after this token was issued
-      return reject(401, 'Session expired. Please log in again.');
-    }
+    // E-01: a deactivated account's live session is a 401 (the session is over), not a 403, so the
+    // frontend's existing "session ended → sign in" handling applies. `code` lets clients tell it
+    // apart from an expired session. Checked BEFORE the revocation test so the reason is accurate.
+    // (POST /auth/login for a deactivated user stays 403 — that is a refused login, not a dead session.)
     if (!user.isActive) {
-      return reject(403, 'Account has been deactivated. Contact support.');
+      return reject(401, 'Account has been deactivated. Contact support.', 'ACCOUNT_DEACTIVATED');
+    }
+    if (isTokenRevoked(user, decoded)) { // AUD-23 / C-09: password changed / sessions revoked after this token was issued
+      return reject(401, 'Session expired. Please log in again.');
     }
 
     req.user = user;

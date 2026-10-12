@@ -97,6 +97,29 @@ const systemConfigSchema = new Schema(
   }
 );
 
+// ── B-06: cross-field validation ─────────────────────────────────────────────
+// Runs on save() / create() / validate() (document validation). The admin PATCH uses a guarded
+// findOneAndUpdate, which does not run document hooks: AdminAPI.attemptThresholdUpdate performs the
+// same two checks against the merged values (E-16 / L-14) — keep both in step.
+systemConfigSchema.pre('validate', function checkThresholdConsistency() {
+  const st = this.scoreThresholds;
+  if (st && [st.mediumMin, st.highMin, st.criticalMin].every((v) => typeof v === 'number')) {
+    if (!(st.mediumMin < st.highMin && st.highMin < st.criticalMin)) {
+      this.invalidate(
+        'scoreThresholds',
+        `scoreThresholds ordering violated: mediumMin(${st.mediumMin}) must be < highMin(${st.highMin}) must be < criticalMin(${st.criticalMin})`
+      );
+    }
+  }
+  const vl = this.velocityLimit;
+  if (vl && typeof vl.maxPerHour === 'number' && typeof vl.maxPerDay === 'number' && vl.maxPerDay < vl.maxPerHour) {
+    this.invalidate(
+      'velocityLimit',
+      `velocityLimit.maxPerDay (${vl.maxPerDay}) must be greater than or equal to maxPerHour (${vl.maxPerHour})`
+    );
+  }
+});
+
 // ── Indexes ───────────────────────────────────────────────────────────────────
 // singleton is indexed automatically via unique: true — enforces single-document pattern.
 

@@ -1,12 +1,9 @@
-// vitest.config.js  (finguardai-frontend/)
+// vitest.config.js  (frontend/)
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // vitest 3 bundles Vite 7, which transforms JSX with esbuild's classic runtime
-  // ("React is not defined"); the app itself builds with Vite 8's automatic runtime.
-  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'jsdom',
     globals: true,
@@ -21,10 +18,19 @@ export default defineConfig({
           branches: 80,
           statements: 80,
         },
+        // T-02: pages are gated too (they were at 0 % for several files before the round-1 tests;
+        // the aggregate is ~90 % lines now). Kept below the measured values so a small refactor
+        // does not trip it, but a page losing its tests would.
+        'src/pages/**/*.jsx': {
+          lines: 85,
+          functions: 80,
+          branches: 80,
+          statements: 85,
+        },
       },
       // N-10: report on ALL application code (it used to measure only the slices, so the
-      // 80 % gate said nothing about pages, hooks or components). The enforced gate stays the
-      // Phase 8 target — Redux slices ≥ 80 % — see `thresholds` above.
+      // 80 % gate said nothing about pages, hooks or components). The enforced gates are the
+      // Phase 8 target — Redux slices ≥ 80 % — and, since T-02, the pages — see `thresholds` above.
       include: ['src/**/*.{js,jsx}'],
       exclude: ['src/**/__tests__/**', 'src/**/*.test.{js,jsx}', 'src/tests/**', 'src/main.jsx', 'src/**/index.js'],
     },

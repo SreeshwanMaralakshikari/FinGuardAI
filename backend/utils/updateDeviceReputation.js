@@ -20,7 +20,7 @@
  *   counter fields; those figures are derived from TransactionModel at call time
  *   so they always reflect the accurate state of the ledger.  The current
  *   transaction is already committed to the DB before this function is called
- *   (Phase 4 step order), so countDocuments returns accurate figures.
+ *   (Phase 4 step order), so the counts (one aggregation, C-07) are accurate.
  *
  * Exported function:
  *   updateDeviceReputation(deviceId, userId, transaction, options?) → Promise<DeviceReputationDocument>
@@ -34,11 +34,13 @@
  *   lastSeenAt untouched). Used when an analyst releases a false positive (L-02).
  *   release — implies recalculateOnly and also takes the released transaction back out of
  *   flagCount / fraudTransactionCount (never below zero).
- * @returns {Promise<import('mongoose').Document>}   The upserted DeviceReputation document
+ * @returns {Promise<import('mongoose').Document|null>}   The upserted DeviceReputation document (null when
+ *   recalculateOnly / release found no document: those never create one, R-04)
  */
 
-import TransactionModel from '../models/TransactionModel.js';
+import { countStatuses } from './statusCounts.js';
 import DeviceReputationModel from '../models/DeviceReputationModel.js';
+import { ALERT_RISK_LEVELS, FLAGGED_RISK_LEVELS } from './enums.js';
 
 const REPUTATION_PRIOR = 3;   // pseudo-count of trusted history for every device
 const HELD_CREDIT = 0.5;      // a HELD transaction counts as half-trusted
@@ -60,11 +62,7 @@ const updateDeviceReputation = async (deviceId, userId, transaction, { recalcula
   //   • Examples: 1 HELD → 88 · 3 BLOCKED → 50 · 10 BLOCKED → 23 (blacklisted)
   // The current transaction is already persisted (Phase 4 step order), so the
   // counts include it.
-  const [totalCount, approvedCount, heldCount] = await Promise.all([
-    TransactionModel.countDocuments({ deviceId }),
-    TransactionModel.countDocuments({ deviceId, status: 'APPROVED' }),
-    TransactionModel.countDocuments({ deviceId, status: 'HELD' }),
-  ]);
+  const { total: totalCount, approved: approvedCount, held: heldCount } = await countStatuses({ deviceId }); // C-07: one aggregation
 
   const trustedWeight = approvedCount + HELD_CREDIT * heldCount + REPUTATION_PRIOR;
   const reputationScore = Math.min(
@@ -76,8 +74,8 @@ const updateDeviceReputation = async (deviceId, userId, transaction, { recalcula
 
   // ── 2. Derive risk category from the saved transaction ────────────────────
   const riskLevel    = transaction.riskLevel ?? 'LOW';
-  const isFlagged    = ['MEDIUM', 'HIGH', 'CRITICAL'].includes(riskLevel);
-  const isFraudulent = ['HIGH', 'CRITICAL'].includes(riskLevel);
+  const isFlagged    = ALERT_RISK_LEVELS.includes(riskLevel);
+  const isFraudulent = FLAGGED_RISK_LEVELS.includes(riskLevel);
 
   // Build $inc object only for the fields that actually need incrementing
   // (avoids creating zero-increment operators when not needed).
@@ -117,10 +115,12 @@ const updateDeviceReputation = async (deviceId, userId, transaction, { recalcula
     }
   }
 
+  // R-04: a recalculation (analyst closing a case) only refreshes a document that exists. Without a document
+  // (the device was over the per-user cap, C-08, or the cleanup removed it) it must NOT create one.
   return DeviceReputationModel.findOneAndUpdate(
     { deviceId },
     updateDoc,
-    { upsert: true, returnDocument: 'after' }
+    { upsert: !recalculateOnly, returnDocument: 'after' }
   );
 };
 

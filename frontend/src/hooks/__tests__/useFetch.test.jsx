@@ -75,4 +75,23 @@ describe('useFetch', () => {
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
+
+  it('F-07: passes an AbortSignal to the fetcher and aborts it when the inputs change, on reload and on unmount', async () => {
+    const signals = [];
+    const fetcher = (signal) => { signals.push(signal); return new Promise(() => {}); };
+    const { rerender, result, unmount } = renderHook(({ q }) => useFetch(fetcher, [q]), { initialProps: { q: 'a' } });
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0].aborted).toBe(false);
+
+    rerender({ q: 'b' });                       // new inputs → the stale request is cancelled
+    expect(signals[0].aborted).toBe(true);
+    expect(signals[1].aborted).toBe(false);
+
+    act(() => result.current.reload());         // reload → previous one cancelled too
+    expect(signals[1].aborted).toBe(true);
+    expect(signals[2].aborted).toBe(false);
+
+    unmount();
+    expect(signals[2].aborted).toBe(true);
+  });
 });

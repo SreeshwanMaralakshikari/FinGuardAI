@@ -33,7 +33,7 @@ export default function Profile() {
   const dispatch = useAppDispatch();
   const authUser = useAppSelector((s) => s.auth.user);
   const { data, loading, error, reload } = useFetch(
-    async () => (await api.get(API_PATHS.CUSTOMER.PROFILE)).data.data,
+    async (signal) => (await api.get(API_PATHS.CUSTOMER.PROFILE, { signal })).data.data,
     [],
   );
   const [file, setFile] = useState(null);

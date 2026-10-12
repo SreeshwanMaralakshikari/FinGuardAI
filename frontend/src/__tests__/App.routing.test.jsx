@@ -105,7 +105,7 @@ describe('N-17: return to the page the visitor wanted after signing in', () => {
     renderApp(<App />, { route: '/analyst/device-reputation?deviceId=web-123' });
     await signIn('ravi@example.com');
     expect(await screen.findByRole('heading', { name: /device reputation/i })).toBeInTheDocument();
-    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/analyst-api/devices/web-123'));
+    await waitFor(() => expect(api.get).toHaveBeenCalledWith('/analyst-api/devices/web-123', expect.objectContaining({ signal: expect.anything() })));
   });
 
   it('falls back to the role home when the remembered page belongs to another role', async () => {

@@ -6,12 +6,13 @@
  *   `dismissible={false}` blocks every way of closing it (use while a request is in flight,
  *   so the outcome cannot be missed).
  */
-import { useRef } from 'react';
+import { useId, useRef } from 'react';
 import { useDialog } from '../../hooks/useDialog.js';
 import Icon from './Icon.jsx';
 
 export default function Modal({ open, title, onClose, children, footer = null, wide = false, dismissible = true }) {
   const panelRef = useRef(null);
+  const titleId = useId(); // F-05: the visible h2 names the dialog
   useDialog({ open, panelRef, onClose, dismissible });
 
   if (!open) return null;
@@ -23,12 +24,12 @@ export default function Modal({ open, title, onClose, children, footer = null, w
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={titleId}
         tabIndex={-1}
         className={`relative max-h-[90vh] w-full overflow-y-auto rounded-xl bg-white shadow-xl focus:outline-none ${wide ? 'max-w-3xl' : 'max-w-lg'}`}
       >
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+          <h2 id={titleId} className="text-lg font-semibold text-gray-900">{title}</h2>
           <button
             type="button"
             onClick={onClose}

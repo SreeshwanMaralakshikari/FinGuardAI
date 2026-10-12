@@ -6,7 +6,7 @@
  *   order, so any module that reads process.env at import time
  *   (cloudinary.js, app.js) only sees the values if this runs first.
  *
- *   - Local dev: reads finguardai-backend/.env
+ *   - Local dev: reads backend/.env
  *   - Render:    no .env file exists; variables come from the dashboard.
  *                dotenv never overrides a variable that is already set.
  *   - Time zone: process.env.TZ is ALWAYS set to APP_TIME_ZONE (default

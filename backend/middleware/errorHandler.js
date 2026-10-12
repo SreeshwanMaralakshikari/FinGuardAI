@@ -20,8 +20,9 @@
  */
 import mongoose from 'mongoose';
 import multer from 'multer';
+import { isProductionLike } from '../config/environment.js';
 
-// eslint-disable-next-line no-unused-vars -- Express identifies error handlers by arity (4 args)
+// Express identifies error handlers by arity (4 args): keep `next` even where it is unused.
 const errorHandler = (err, req, res, next) => {
   if (res.headersSent) return next(err);
 
@@ -61,10 +62,10 @@ const errorHandler = (err, req, res, next) => {
   }
 
   console.error('[errorHandler]', err);
-  const isProduction = process.env.NODE_ENV === 'production';
+  // D-03: raw messages only for NODE_ENV=development|test; anything else is production-like.
   return res.status(500).json({
     success: false,
-    message: isProduction ? 'Internal server error.' : (err?.message ?? 'Internal server error.'),
+    message: isProductionLike() ? 'Internal server error.' : (err?.message ?? 'Internal server error.'),
   });
 };
 

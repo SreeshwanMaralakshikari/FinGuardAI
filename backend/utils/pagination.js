@@ -11,8 +11,8 @@
  *   (customer 10 · analyst/notifications 20 · admin 50).
  * @phase Phase 4 support — Phase 1–9 audit (round 2)
  */
-export const MAX_PAGE_LIMIT = 100;
-export const MAX_PAGE = 100_000;
+const MAX_PAGE_LIMIT = 100;
+const MAX_PAGE = 100_000;
 
 const toPositiveInt = (value, fallback) => {
   const n = Number.parseInt(value, 10);
@@ -29,3 +29,17 @@ export const parsePagination = (query = {}, defaultLimit = 10) => {
   const limit = Math.min(toPositiveInt(query.limit, defaultLimit), MAX_PAGE_LIMIT);
   return { page, limit, skip: (page - 1) * limit };
 };
+
+/**
+ * H-01: the `pagination` block of every list response.
+ * @param {number|string} page
+ * @param {number|string} limit
+ * @param {number} total  matching documents
+ * @returns {{ page: number, limit: number, total: number, pages: number }}
+ */
+export const buildPagination = (page, limit, total) => ({
+  page: Number(page),
+  limit: Number(limit),
+  total,
+  pages: Math.ceil(total / Number(limit)),
+});

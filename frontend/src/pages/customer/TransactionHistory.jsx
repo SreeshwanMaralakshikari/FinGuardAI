@@ -12,19 +12,21 @@ import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
 import {
   fetchTransactionsThunk, fetchTransactionByIdThunk, clearSelectedTransaction,
 } from '../../store/slices/transactionSlice.js';
-import { BTN, INPUT, TABLE, formatCurrency, formatDate } from '../../utils/common.js';
+import { BTN, INPUT, TABLE, formatCurrency, formatDate, formatLocation } from '../../utils/common.js';
 import { PAGINATION, RISK_LEVELS, PAYMENT_METHODS } from '../../utils/constants.js';
 import { dateRangeParams } from '../../utils/dates.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import Pagination from '../../components/common/Pagination.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
 import Spinner from '../../components/common/Spinner.jsx';
+import TableSkeleton from '../../components/common/TableSkeleton.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import BusyRegion from '../../components/common/BusyRegion.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
+import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 const EMPTY_FILTERS = { riskLevel: '', paymentMethod: '', startDate: '', endDate: '' };
@@ -96,7 +98,7 @@ export default function TransactionHistory() {
       {error ? (
         <LoadError message={error} onRetry={() => setAttempt((n) => n + 1)} />
       ) : loading && transactions.length === 0 ? (
-        <Spinner />
+        <TableSkeleton cols={9} />
       ) : transactions.length === 0 ? (
         <EmptyState title="No transactions found" message="Try clearing the filters, or submit a new transaction." />
       ) : (
@@ -106,7 +108,7 @@ export default function TransactionHistory() {
               <thead className={TABLE.thead}>
                 <tr>
                   {['ID', 'Merchant', 'Amount', 'Method', 'Score', 'Risk', 'Status', 'Date', ''].map((h) => (
-                    <th key={h || 'actions'} className={TABLE.th}>{h}</th>
+                    <th key={h || 'actions'} className={TABLE.th}>{h || <span className="sr-only">Actions</span>}</th>
                   ))}
                 </tr>
               </thead>
@@ -144,7 +146,7 @@ export default function TransactionHistory() {
               <DetailRow label="Merchant">{t.merchantName}</DetailRow>
               <DetailRow label="Category">{t.merchantCategory}</DetailRow>
               <DetailRow label="Payment method">{t.paymentMethod?.replace('_', ' ')}</DetailRow>
-              <DetailRow label="Location">{[t.location?.city, t.location?.country].filter(Boolean).join(', ') || '—'}</DetailRow>
+              <DetailRow label="Location">{formatLocation(t.location)}</DetailRow>
               <DetailRow label="Device">{t.deviceId}</DetailRow>
               <DetailRow label="Status"><TxStatusBadge status={t.status} /></DetailRow>
               <DetailRow label="Risk"><RiskBadge level={t.riskLevel} /></DetailRow>
@@ -154,8 +156,10 @@ export default function TransactionHistory() {
 
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
-              <ScoreBar value={t.fraudScore} label="Fraud score" />
+              <ScoreBar value={t.fraudScore} riskLevel={t.riskLevel} label="Fraud score" />
             </div>
+
+            <ScoreBreakdown breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Why this score</p>

@@ -20,7 +20,8 @@
  *     parent domain; leave it unset to bind the cookie to the API host only,
  *     which is enough when the browser talks to the API directly.
  *
- *   Development / test (any NODE_ENV other than 'production', Vite proxy →
+ *   Development / test (NODE_ENV exactly 'development' or 'test' — D-03: any other
+ *   value, or none, is production-like; Vite proxy →
  *   same origin): sameSite: 'lax', secure: false — works over plain
  *   http://localhost. COOKIE_MODE / COOKIE_DOMAIN are ignored there.
  *
@@ -30,19 +31,19 @@
  * @phase Phase 9 — Deployment (COOKIE_MODE added in the fix round, D-02)
  */
 
+import { isProductionLike } from './environment.js';
+
 const SIX_HOURS_MS = 6 * 60 * 60 * 1000; // must match jwt expiresIn: '6h'
 
 export const COOKIE_MODES = Object.freeze(['cross-site', 'same-site']);
 
 /** @returns {string} the raw configured mode (lower-cased), 'cross-site' when unset */
-export const getCookieMode = () =>
+const getCookieMode = () =>
   (process.env.COOKIE_MODE ?? '').trim().toLowerCase() || 'cross-site';
 
 const baseCookieOptions = () => {
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  if(!isProduction)
-  {
+  // D-03: only an explicit NODE_ENV=development|test gets the relaxed (non-Secure) cookie.
+  if (!isProductionLike()) {
     return { httpOnly: true, path: '/', secure: false, sameSite: 'lax' };
   }
 

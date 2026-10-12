@@ -3,17 +3,20 @@ import mongoose from 'mongoose';
 import { verifyToken, authorizeRoles } from '../middleware/verifyToken.js';
 import validate from '../middleware/validate.js';
 import asyncHandler from '../middleware/asyncHandler.js';
-import { parsePagination } from '../utils/pagination.js';
+import { parsePagination, buildPagination } from '../utils/pagination.js';
 import { createCaseRules, updateStatusRules, addNoteRules } from '../validators/caseValidators.js';
 import { createWithSequentialId } from '../utils/generateSequentialId.js';
 import createNotification from '../utils/createNotification.js';
 import createAuditLog from '../utils/createAuditLog.js';
 import { buildDateRange } from '../utils/dateRange.js';
+import { FLAGGED_RISK_LEVELS } from '../utils/enums.js';
+import { analystCasesQueryRules, flaggedTransactionsQueryRules } from '../validators/queryValidators.js';
 import {
   CLOSED_STATUSES,
   isTransitionAllowed,
   describeTransition,
   applyCaseOutcome,
+  notifyAnalystsOfStatusChange,
 } from '../utils/caseWorkflow.js';
 import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
@@ -59,24 +62,24 @@ const isDuplicateAlertCase = async (err, fraudAlertId) => {
 // ── GET /analyst-api/flagged-transactions ─────────────────────────────────────
 router.get(
   '/flagged-transactions',
+  flaggedTransactionsQueryRules, // E-14: ?riskLevel=LOW used to be ignored silently
+  validate,
   asyncHandler(async (req, res) => {
     const { riskLevel } = req.query;
     const { page, limit, skip } = parsePagination(req.query, 20); // AUD-21
 
     // Base: system-wide HIGH and CRITICAL only
-    const filter = { riskLevel: { $in: ['HIGH', 'CRITICAL'] } };
+    const filter = { riskLevel: { $in: FLAGGED_RISK_LEVELS } };
 
-    // Optional narrow filter — validate it stays within HIGH/CRITICAL
-    if (riskLevel && ['HIGH', 'CRITICAL'].includes(riskLevel)) {
-      filter.riskLevel = riskLevel;
-    }
+    // Optional narrow filter — the validator guarantees HIGH or CRITICAL
+    if (riskLevel) filter.riskLevel = riskLevel;
 
     const dateFilter = buildDateRange(req.query); // L-05: 'YYYY-MM-DD' = a whole IST day
     if (dateFilter) filter.timestamp = dateFilter;
 
     const [transactions, total] = await Promise.all([
       TransactionModel.find(filter)
-        .sort({ timestamp: -1 })
+        .sort({ timestamp: -1, _id: -1 }) // C-06: stable paging when timestamps tie
         .skip(skip)
         .limit(Number(limit))
         .populate('userId', 'name email trustScore')
@@ -87,12 +90,7 @@ router.get(
     res.status(200).json({
       success: true,
       data: transactions,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit)),
-      },
+      pagination: buildPagination(page, limit, total),
     });
   })
 );
@@ -101,7 +99,8 @@ router.get(
 router.get(
   '/flagged-transactions/:id',
   asyncHandler(async (req, res) => {
-    const transaction = await TransactionModel.findById(req.params.id)
+    // E-05: same visibility as the list — LOW / MEDIUM transactions are not part of the analyst queue.
+    const transaction = await TransactionModel.findOne({ _id: req.params.id, riskLevel: { $in: FLAGGED_RISK_LEVELS } })
       .populate('userId', 'name email trustScore createdAt');
 
     if (!transaction) {
@@ -117,6 +116,17 @@ router.get(
         .select('publicId status assignedAnalystId openedAt')
         .populate('assignedAnalystId', 'name email'),
     ]);
+
+    // A-09: an analyst reading a customer's transaction is part of the audit trail (a failed write is only logged).
+    await createAuditLog(
+      req.user._id,
+      'ANALYST',
+      'TRANSACTION_VIEWED',
+      'Transaction',
+      transaction.publicId,
+      { customerId: String(transaction.userId?._id ?? transaction.userId), riskLevel: transaction.riskLevel },
+      req.ip
+    );
 
     res.status(200).json({
       success: true,
@@ -141,6 +151,11 @@ router.post(
     const fraudAlert = await FraudAlertModel.findById(fraudAlertId);
     if (!fraudAlert) {
       return res.status(404).json({ success: false, message: 'Fraud alert not found.' });
+    }
+
+    // E-05: MEDIUM alerts never enter the analyst queue (AUD-38), so no case can be opened on one.
+    if (!FLAGGED_RISK_LEVELS.includes(fraudAlert.riskLevel)) {
+      return res.status(400).json({ success: false, message: 'Cases can only be opened for HIGH or CRITICAL alerts.' });
     }
 
     // Prevent duplicate cases for the same alert (friendly pre-check; the unique
@@ -173,9 +188,7 @@ router.post(
     }
     const { publicId } = fraudCase;
 
-    // Mark the originating fraud alert as REVIEWED (single-field write: cannot
-    // overwrite anything else that changed on the alert meanwhile)
-    await FraudAlertModel.updateOne({ _id: fraudAlert._id }, { $set: { status: 'REVIEWED' } });
+    // B-04: the alert stays OPEN while its case is open; applyCaseOutcome sets REVIEWED / DISMISSED when the case closes.
 
     await createAuditLog(
       req.user._id,
@@ -198,6 +211,8 @@ router.post(
 // ── GET /analyst-api/cases ────────────────────────────────────────────────────
 router.get(
   '/cases',
+  analystCasesQueryRules, // E-14
+  validate,
   asyncHandler(async (req, res) => {
     const { status, assignedToMe } = req.query;
     const { page, limit, skip } = parsePagination(req.query, 20); // AUD-21
@@ -208,7 +223,7 @@ router.get(
 
     const [cases, total] = await Promise.all([
       FraudCaseModel.find(filter)
-        .sort({ openedAt: -1 })
+        .sort({ openedAt: -1, _id: -1 }) // C-06
         .skip(skip)
         .limit(Number(limit))
         .populate('assignedAnalystId', 'name email')
@@ -220,12 +235,7 @@ router.get(
     res.status(200).json({
       success: true,
       data: cases,
-      pagination: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        pages: Math.ceil(total / Number(limit)),
-      },
+      pagination: buildPagination(page, limit, total),
     });
   })
 );
@@ -287,20 +297,8 @@ router.patch(
     );
     if (!updated) return respondCaseChanged(res, fraudCase._id);
 
-    // Notify the analyst who took the case
-    try {
-      await createNotification({
-        recipientId: analystId,
-        recipientRole: 'ANALYST',
-        type: 'CASE_ASSIGNED',
-        title: `Case ${updated.publicId} Assigned to You`,
-        message: `You are now assigned to investigation case ${updated.publicId}.`,
-        relatedEntityId: updated._id,
-        relatedEntityType: 'FRAUD_CASE',
-      });
-    } catch (err) {
-      console.error('[AnalystAPI] Could not notify the assigned analyst:', err.message);
-    }
+    // E-13: the analyst who takes the case is the one making this request, so there is nobody
+    // to tell about "their own" action. Only the analyst who LOST the case is notified (below).
 
     // …and the analyst who just lost it (BS-18)
     if (previousAnalyst && !previousAnalyst.equals(analystId)) {
@@ -412,6 +410,9 @@ router.patch(
       req.ip
     );
 
+    // A-03: the other analysts are told too (never fails the request).
+    await notifyAnalystsOfStatusChange({ fraudCase: updated, previousStatus, newStatus: status, actor: req.user });
+
     res.status(200).json({
       success: true,
       message: 'Case status updated.',
@@ -480,10 +481,20 @@ router.get(
 
     // Recent 10 transactions from this device for context
     const recentTransactions = await TransactionModel.find({ deviceId: req.params.deviceId })
-      .sort({ timestamp: -1 })
+      .sort({ timestamp: -1, _id: -1 })
       .limit(10)
       .populate('userId', 'name email')
       .select('publicId amount merchantName riskLevel fraudScore status timestamp');
+
+    await createAuditLog(
+      req.user._id,
+      'ANALYST',
+      'DEVICE_VIEWED',
+      'Device',
+      req.params.deviceId,
+      { associatedUsers: device.associatedUserIds?.length ?? 0 },
+      req.ip
+    );
 
     res.status(200).json({
       success: true,
@@ -496,7 +507,7 @@ router.get(
 router.get(
   '/fraud-patterns',
   asyncHandler(async (req, res) => {
-    const highRiskMatch = { riskLevel: { $in: ['HIGH', 'CRITICAL'] } };
+    const highRiskMatch = { riskLevel: { $in: FLAGGED_RISK_LEVELS } };
 
     const txnProjection = {
       id: '$_id',
@@ -507,36 +518,57 @@ router.get(
       timestamp: '$timestamp',
     };
 
+    // E-04: $push keeps the order the documents reach $group, so without a sort the 10
+    // transactions shown per cluster were arbitrary (often not the newest). Sorting
+    // newest-first (with an _id tie-break) before every $group makes `$slice: 10` = the 10 newest.
+    const newestFirst = { $sort: { timestamp: -1, _id: -1 } };
+    // C-06: equal counts resolve in a fixed order, so the top-20 cut is stable.
+    const biggestFirst = { $sort: { count: -1, _id: 1 } };
+
     // AUD-39: each cluster also reports userCount (distinct customers). A "shared"
     // IP/device cluster with userCount 1 is one customer's repeated attempts,
     // not an account-sharing pattern — the UI can tell them apart.
     const [sharedIpClusters, sharedDeviceClusters, highRiskMerchantClusters] = await Promise.all([
       TransactionModel.aggregate([
         { $match: { ...highRiskMatch, ipAddress: { $exists: true, $ne: '' } } },
+        newestFirst,
         { $group: { _id: '$ipAddress', count: { $sum: 1 }, users: { $addToSet: '$userId' }, transactions: { $push: txnProjection } } },
         { $match: { count: { $gte: 2 } } },
-        { $sort: { count: -1 } },
+        biggestFirst,
         { $limit: 20 },
         { $project: { _id: 0, ipAddress: '$_id', count: 1, userCount: { $size: '$users' }, transactions: { $slice: ['$transactions', 10] } } },
-      ]),
+      ]).allowDiskUse(true), // round-1 note: $push/$addToSet over a big window can exceed the 100 MB in-memory limit
 
       TransactionModel.aggregate([
         { $match: highRiskMatch },
+        newestFirst,
         { $group: { _id: '$deviceId', count: { $sum: 1 }, users: { $addToSet: '$userId' }, transactions: { $push: txnProjection } } },
         { $match: { count: { $gte: 2 } } },
-        { $sort: { count: -1 } },
+        biggestFirst,
         { $limit: 20 },
         { $project: { _id: 0, deviceId: '$_id', count: 1, userCount: { $size: '$users' }, transactions: { $slice: ['$transactions', 10] } } },
-      ]),
+      ]).allowDiskUse(true), // round-1 note: $push/$addToSet over a big window can exceed the 100 MB in-memory limit
 
       TransactionModel.aggregate([
         { $match: highRiskMatch },
-        { $group: { _id: '$merchantName', count: { $sum: 1 }, users: { $addToSet: '$userId' }, transactions: { $push: txnProjection } } },
+        newestFirst,
+        // E-09: "Casino X", "casino x" and " CASINO X " are one merchant (the count >= 3 threshold
+        // under-reported otherwise). Group on the trimmed lower-case key and show the spelling of
+        // the newest transaction.
+        {
+          $group: {
+            _id: { $toLower: { $trim: { input: '$merchantName' } } },
+            merchantName: { $first: '$merchantName' },
+            count: { $sum: 1 },
+            users: { $addToSet: '$userId' },
+            transactions: { $push: txnProjection },
+          },
+        },
         { $match: { count: { $gte: 3 } } },
-        { $sort: { count: -1 } },
+        biggestFirst,
         { $limit: 20 },
-        { $project: { _id: 0, merchantName: '$_id', count: 1, userCount: { $size: '$users' }, transactions: { $slice: ['$transactions', 10] } } },
-      ]),
+        { $project: { _id: 0, merchantName: 1, count: 1, userCount: { $size: '$users' }, transactions: { $slice: ['$transactions', 10] } } },
+      ]).allowDiskUse(true), // round-1 note: $push/$addToSet over a big window can exceed the 100 MB in-memory limit
     ]);
 
     res.status(200).json({

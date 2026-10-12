@@ -17,6 +17,9 @@ import { body } from 'express-validator';
 
 const MAX_PASSWORD_BYTES = 72;
 const withinBcryptLimit = (value) => Buffer.byteLength(String(value), 'utf8') <= MAX_PASSWORD_BYTES;
+// D-05: eight spaces are 8 characters but not a password.
+const hasVisibleCharacter = (value) => /\S/.test(String(value));
+const PASSWORD_BLANK = 'Password must contain at least one character that is not a space';
 const PASSWORD_TOO_LONG = `Password must be at most ${MAX_PASSWORD_BYTES} characters (${MAX_PASSWORD_BYTES} bytes — non-English characters count as more than one)`;
 
 export const registerRules = [
@@ -35,6 +38,7 @@ export const registerRules = [
   body('password')
     .isString().withMessage('Password must be a string').bail()
     .isLength({ min: 8 }).withMessage('Password must be at least 8 characters').bail()
+    .custom(hasVisibleCharacter).withMessage(PASSWORD_BLANK).bail()
     .custom(withinBcryptLimit).withMessage(PASSWORD_TOO_LONG),
 
   body('role')
@@ -68,6 +72,7 @@ export const changePasswordRules = [
   body('newPassword')
     .isString().withMessage('New password must be a string').bail()
     .isLength({ min: 8 }).withMessage('New password must be at least 8 characters').bail()
+    .custom(hasVisibleCharacter).withMessage(PASSWORD_BLANK).bail()
     .custom(withinBcryptLimit).withMessage(PASSWORD_TOO_LONG).bail()
     .custom((value, { req }) => {
       if (value === req.body.currentPassword) {

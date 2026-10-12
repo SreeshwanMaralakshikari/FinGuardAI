@@ -19,7 +19,7 @@ export default function AuthShell({ title, subtitle, children, footer }) {
             merchant signals — so suspicious payments are held or blocked before money moves.
           </p>
         </div>
-        <p className="text-xs text-gray-500">Student project — FinGuardAI Intelligent Fraud Detection System</p>
+        <p className="text-xs text-gray-400">Student project — FinGuardAI Intelligent Fraud Detection System</p>
       </div>
 
       <div className="flex flex-1 items-center justify-center px-4 py-10">

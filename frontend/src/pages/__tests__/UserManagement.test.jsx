@@ -22,10 +22,10 @@ describe('UserManagement', () => {
     api.get.mockResolvedValue(page(USERS, 4, 1, 50));
     renderPage();
     expect(await screen.findByText('User c1')).toBeInTheDocument();
-    expect(api.get).toHaveBeenLastCalledWith('/admin-api/users', { params: { page: 1, limit: 50 } });
+    expect(api.get).toHaveBeenLastCalledWith('/admin-api/users', { params: { page: 1, limit: 50 }, signal: expect.any(AbortSignal) });
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: 'ANALYST' } });
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'false' } });
-    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/admin-api/users', { params: { page: 1, limit: 50, role: 'ANALYST', isActive: 'false' } }));
+    await waitFor(() => expect(api.get).toHaveBeenLastCalledWith('/admin-api/users', { params: { page: 1, limit: 50, role: 'ANALYST', isActive: 'false' }, signal: expect.any(AbortSignal) }));
   });
 
   it('N-02: a failed load shows the error + Retry and NOT the "No users found" empty state', async () => {

@@ -21,25 +21,25 @@ import EmptyState from '../../components/common/EmptyState.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import { RiskBadge, CaseStatusBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
-const countOf = async (params) =>
-  (await api.get(API_PATHS.ANALYST.CASES, { params: { ...params, limit: 1 } })).data.pagination.total;
+const countOf = async (params, signal) =>
+  (await api.get(API_PATHS.ANALYST.CASES, { params: { ...params, limit: 1 }, signal })).data.pagination.total;
 
 export default function AnalystDashboard() {
   const user = useAppSelector((s) => s.auth.user);
 
-  const openCases = useFetch(async () => {
-    const res = await api.get(API_PATHS.ANALYST.CASES, { params: { status: 'OPEN', limit: PAGINATION.DEFAULT_LIMIT_CASES } });
+  const openCases = useFetch(async (signal) => {
+    const res = await api.get(API_PATHS.ANALYST.CASES, { params: { status: 'OPEN', limit: PAGINATION.DEFAULT_LIMIT_CASES }, signal });
     return { rows: res.data.data ?? [], total: res.data.pagination?.total ?? 0 };
   }, []);
-  const flagged = useFetch(async () => {
-    const res = await api.get(API_PATHS.ANALYST.FLAGGED_TRANSACTIONS, { params: { limit: 5 } });
+  const flagged = useFetch(async (signal) => {
+    const res = await api.get(API_PATHS.ANALYST.FLAGGED_TRANSACTIONS, { params: { limit: 5 }, signal });
     return { rows: res.data.data ?? [], total: res.data.pagination?.total ?? 0 };
   }, []);
 
-  const mine = useFetch(async () => {
+  const mine = useFetch(async (signal) => {
     const [assigned, review] = await Promise.all([
-      countOf({ assignedToMe: 'true', status: 'ASSIGNED' }),
-      countOf({ assignedToMe: 'true', status: 'UNDER_REVIEW' }),
+      countOf({ assignedToMe: 'true', status: 'ASSIGNED' }, signal),
+      countOf({ assignedToMe: 'true', status: 'UNDER_REVIEW' }, signal),
     ]);
     return assigned + review;
   }, []);
