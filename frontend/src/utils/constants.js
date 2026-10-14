@@ -71,6 +71,7 @@ export const API_PATHS = Object.freeze({
     TIMELINE:           '/customer-api/timeline',      // A-02
     TRUST_SCORE:        '/customer-api/trust-score',
     PROFILE:            '/customer-api/profile',
+    ML_WARM_UP:         '/customer-api/ml-warm-up',    // D-2 (POST, fire-and-forget)
   }),
 
   ANALYST: Object.freeze({

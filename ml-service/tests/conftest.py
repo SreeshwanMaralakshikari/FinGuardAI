@@ -6,9 +6,9 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from app.config import Settings  # noqa: E402
-from app.model import FraudModel  # noqa: E402
-from app.server import create_app  # noqa: E402
+from app.config import Settings
+from app.model import FraudModel
+from app.server import create_app
 
 TEST_KEY = "test-key-" + "x" * 40
 MODEL_DIR = os.path.join(ROOT, "model")
@@ -37,10 +37,10 @@ def valid_features(**overrides):
     return base
 
 
-ACCOUNT_TAKEOVER = dict(
-    isNewDevice=1, isNewCity=1, amount=9000.0, amountToAvgRatio=10.0,
-    amountToMaxRatio=3.0, hourOfDay=3, isUnusualHour=1,
-)
+ACCOUNT_TAKEOVER = {
+    "isNewDevice": 1, "isNewCity": 1, "amount": 9000.0, "amountToAvgRatio": 10.0,
+    "amountToMaxRatio": 3.0, "hourOfDay": 3, "isUnusualHour": 1,
+}
 
 
 @pytest.fixture(scope="session")

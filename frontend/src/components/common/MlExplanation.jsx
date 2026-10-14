@@ -8,11 +8,19 @@
  *   Accessibility: every value is repeated as text (label, value, signed SHAP, "raises/lowers risk"),
  *   so colour and direction are never the only cue; the bars themselves are aria-hidden.
  *   Colours: red-700 / sky-700 (diverging pair, both ≥ 3:1 on white; validated for colour-blind separation).
+ *   D-1 rule floor: when `scoring.ruleFloor` is true, a note says the model's own score (scoring.mlScore) was
+ *   raised because the rule engine found a policy signal (high-risk merchant, blacklisted device, high-value
+ *   amount). The bars still explain the MODEL's score, which is what SHAP values describe.
  */
 import { useState } from 'react';
 
 const TOP = 6;           // factors shown before "Show all"
 const MIN_VISIBLE = 0.005; // smaller pushes are noise at this resolution
+
+/** D-1: why the final score is higher than the model's own score. */
+const floorText = (scoring) => 'The rule engine found a policy signal (a high-risk merchant category, a blacklisted device or an amount above the high-value limit), so this payment raised an alert'
+  + `${Number.isFinite(scoring.mlScore) ? ` although the model alone gave ${scoring.mlScore}/100` : ''}.`
+  + ' A policy signal raises the payment to at least MEDIUM; only the model can hold or block a payment.';
 
 const signed = (v) => (Math.abs(v) < MIN_VISIBLE ? '0.00' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`);
 const direction = (v) => {
@@ -39,9 +47,16 @@ export default function MlExplanation({ scoring }) {
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">What moved the ML score</p>
         <p className="text-xs text-gray-500">
           Scored by the ML model{scoring?.modelVersion ? ` (${scoring.modelVersion})` : ''}
+          {Number.isFinite(scoring?.mlScore) && <>: {scoring.mlScore}/100</>}
           {Number.isFinite(scoring?.ruleScore) && <> · rule engine would give {scoring.ruleScore}/100</>}
         </p>
       </div>
+
+      {scoring?.ruleFloor && (
+        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" data-testid="ml-rule-floor">
+          {floorText(scoring)}
+        </p>
+      )}
 
       {shown.length === 0 ? (
         <p className="text-sm text-gray-500">No single detail moved the score noticeably.</p>

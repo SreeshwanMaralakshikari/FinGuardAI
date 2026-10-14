@@ -203,3 +203,88 @@ describe('MlStatusCard', () => {
     expect(await screen.findByTestId('ml-status')).toHaveTextContent('ML model fg-xgb-1.0.0');
   });
 });
+
+// ── Error-check round: rule floor (D-1), wake-up (D-2), status wording (E-07), thresholds note (E-02) ──
+describe('rule floor in the explanation (D-1)', () => {
+  const FLOORED = { ...ML_SCORING, mlScore: 3, ruleScore: 35, ruleFloor: true };
+
+  it('says why the final score is above the model\'s own score, and labels the rule check accordingly', () => {
+    render(<FraudExplanation scoring={FLOORED} breakdown={BREAKDOWN} fraudScore={35} />);
+    expect(screen.getByTestId('ml-rule-floor')).toHaveTextContent('although the model alone gave 3/100');
+    expect(screen.getByTestId('ml-rule-floor')).toHaveTextContent('only the model can hold or block a payment');
+    expect(screen.getByText(/Scored by the ML model/)).toHaveTextContent(': 3/100');
+    expect(screen.getByText('Rule engine check (set the minimum score)')).toBeInTheDocument();
+  });
+
+  it('no note without the floor; the rule check stays "for comparison"', () => {
+    render(<FraudExplanation scoring={{ ...ML_SCORING, mlScore: 96 }} breakdown={BREAKDOWN} fraudScore={96} />);
+    expect(screen.queryByTestId('ml-rule-floor')).toBeNull();
+    expect(screen.getByText('Rule engine check (for comparison)')).toBeInTheDocument();
+  });
+});
+
+describe('MlStatusCard wording and wake-up (E-07, D-2)', () => {
+  const status = (over = {}) => ({
+    enabled: true, serviceHost: 'finguardai-ml.onrender.com', timeoutMs: 2500, cooldownMs: 60000, coolingDown: false, cooldownEndsAt: null,
+    waking: false, lastSuccessAt: '2026-10-13T10:00:00Z', lastFailureAt: null, lastFailureCode: null, modelVersion: 'fg-xgb-1.1.0',
+    last24h: { ML: 1, RULES: 0, LEGACY: 0 }, ...over,
+  });
+
+  it('a wrong API key is not shown as "waking up"', async () => {
+    api.get.mockResolvedValueOnce(ok(status({ coolingDown: true, lastFailureCode: 'AUTH' })));
+    renderApp(<MlStatusCard />, { auth: signedIn({ role: 'ADMIN' }) });
+    expect(await screen.findByText('Rule engine (ML key rejected)')).toBeInTheDocument();
+    expect(screen.getByText(/must be exactly the same on the backend and on the ML service/)).toBeInTheDocument();
+    expect(screen.queryByText(/waking up/)).toBeNull();
+  });
+
+  it('a rejected answer has its own text', async () => {
+    api.get.mockResolvedValueOnce(ok(status({ coolingDown: true, lastFailureCode: 'INVALID_RESPONSE' })));
+    renderApp(<MlStatusCard />, { auth: signedIn({ role: 'ADMIN' }) });
+    expect(await screen.findByText('Rule engine (ML answer rejected)')).toBeInTheDocument();
+  });
+
+  it('a contract mismatch after the last success is called out', async () => {
+    api.get.mockResolvedValueOnce(ok(status({ lastFailureCode: 'CONTRACT', lastFailureAt: '2026-10-13T11:00:00Z' })));
+    renderApp(<MlStatusCard />, { auth: signedIn({ role: 'ADMIN' }) });
+    expect(await screen.findByText(/rejected as a contract mismatch \(422\)/)).toBeInTheDocument();
+  });
+
+  it('waking: says so, then re-checks every 10 s until the model answers', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.get
+        .mockResolvedValueOnce(ok(status({ waking: true, lastSuccessAt: null })))
+        .mockResolvedValueOnce(ok(status()));
+      renderApp(<MlStatusCard />, { auth: signedIn({ role: 'ADMIN' }) });
+      expect(await screen.findByText('ML model fg-xgb-1.1.0 (waking up)')).toBeInTheDocument();
+      expect(api.get).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await screen.findByText('ML model fg-xgb-1.1.0')).toBeInTheDocument();
+      expect(api.get).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(api.get).toHaveBeenCalledTimes(2);       // settled: no more polling
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('ML wake-up from the Submit page (D-2)', () => {
+  it('opening the page asks the backend to wake the ML service once', async () => {
+    const { warmUpMl } = await import('../api/mlWarmUp.js'); // mocked in src/tests/setup.js
+    renderApp(<SubmitTransaction />, { auth: signedIn() });
+    await screen.findByRole('button', { name: /submit/i });
+    expect(warmUpMl).toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();                  // the page's own POST mocks stay untouched
+  });
+
+  it('warmUpMl posts to the warm-up route and never throws', async () => {
+    const { warmUpMl } = await vi.importActual('../api/mlWarmUp.js');
+    api.post.mockResolvedValueOnce(ok({ mlEnabled: true, warming: true }));
+    await expect(warmUpMl()).resolves.toBe(true);
+    expect(api.post).toHaveBeenCalledWith('/customer-api/ml-warm-up');
+    api.post.mockRejectedValueOnce(fail(500, 'boom'));
+    await expect(warmUpMl()).resolves.toBe(false);
+  });
+});

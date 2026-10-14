@@ -1,20 +1,26 @@
+import json
 import math
+import os
 
 import pytest
 
 from app.features import (
     CONTRACT_KEYS,
+    MAX_AMOUNT,
     MODEL_COLUMNS,
     NUMERIC_FEATURE_NAMES,
     FeatureValidationError,
+    _fmt_inr,
+    _times,
     build_reason_details,
     build_reasons,
+    contract_description,
     group_contributions,
     probability_to_score,
     to_model_row,
     validate_features,
 )
-from tests.conftest import valid_features
+from tests.conftest import MODEL_DIR, valid_features
 
 
 def errors_for(payload):
@@ -65,6 +71,19 @@ class TestValidation:
                                             ("deviceReputationScore", 100.5), ("txnsLastDay", -1)])
     def test_out_of_range(self, name, value):
         assert "must be between" in errors_for(valid_features(**{name: value}))[name]
+
+    def test_amount_limit_is_100_crore_like_the_backend_and_form(self):
+        # E-01: the backend validator and the form accept up to ₹100 crore; the contract must too,
+        # or the largest payments are rejected (422) and can never be ML-scored.
+        assert MAX_AMOUNT == 1_000_000_000
+        assert validate_features(valid_features(amount=500_000_000.0))["amount"] == 500_000_000.0
+        assert validate_features(valid_features(amount=1_000_000_000.0))["amount"] == 1_000_000_000.0
+        assert "must be between" in errors_for(valid_features(amount=1_000_000_000.01))["amount"]
+
+    def test_stored_contract_matches_the_code(self):
+        # model_meta.json documents the contract the model ships with; it must never drift from the code.
+        with open(os.path.join(MODEL_DIR, "model_meta.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["contract"] == contract_description()
 
     @pytest.mark.parametrize("bad", ["CASH", "", 3, None])
     def test_invalid_payment_method(self, bad):
@@ -144,6 +163,19 @@ class TestReasons:
         grouped = {k: 0.0 for k in CONTRACT_KEYS}
         grouped["amount"] = 1.0
         assert build_reasons(clean, grouped) == ["Payment amount of ₹50,000 raised the risk"]
+
+    @pytest.mark.parametrize("value,text", [(21.74, "21.7×"), (1.0, "1.0×"), (543478.26, "5,43,478.3×")])
+    def test_ratios_use_one_decimal_and_indian_grouping(self, value, text):
+        assert _times(value) == text
+
+    @pytest.mark.parametrize("value,text", [
+        (100.0, "₹100"), (999.0, "₹999"), (1000.0, "₹1,000"), (50000.0, "₹50,000"),
+        (150000.0, "₹1,50,000"), (1234.5, "₹1,234.5"), (12345678.5, "₹1,23,45,678.5"),
+        (0.01, "₹0.01"), (1_000_000_000.0, "₹1,00,00,00,000"), (99999.999, "₹1,00,000"),
+    ])
+    def test_rupees_use_indian_grouping_like_the_backend(self, value, text):
+        # E-05: same text as the backend's formatRupees (en-IN, at most 2 decimals), which labels the SHAP bars.
+        assert _fmt_inr(value) == text
 
 
     def test_details_pair_each_sentence_with_its_feature(self):

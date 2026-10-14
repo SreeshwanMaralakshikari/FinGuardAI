@@ -7,9 +7,9 @@ comparison in reports/metrics.json compares against the real rules.
 import pytest
 
 from app.features import validate_features
+from tests.conftest import valid_features
 from training.generate_data import OUTPUT_COLUMNS, simulate
 from training.rule_engine import _js_round, rule_score_row
-from tests.conftest import valid_features
 
 
 def rules(**overrides):
@@ -76,3 +76,28 @@ class TestGenerator:
             first.setdefault(row["customerId"], row)
         assert all(r["hasProfile"] == 0 and r["isNewDevice"] == 0 and r["amountToAvgRatio"] == 1.0
                    for r in first.values())
+
+
+class TestRuleFloor:
+    """training/evaluate_floor.py mirrors scoringService.applyRuleFloor (alert-only floor)."""
+
+    def test_floor_matches_the_backend_cases(self):
+        import numpy as np
+
+        from training.evaluate_floor import apply_rule_floor
+        ml = np.array([0, 0, 30, 40, 70, 0, 0], dtype=float)
+        rule = np.array([35, 80, 35, 35, 90, 20, 60], dtype=float)
+        hard = np.array([True, True, True, True, True, True, False])
+        # same table as backend tests/ml.units.test.js → applyRuleFloor
+        assert apply_rule_floor(ml, rule, hard).tolist() == [35, 49, 35, 40, 70, 0, 0]
+
+    def test_hard_signal_is_blacklist_high_risk_merchant_or_high_value(self):
+        import pandas as pd
+
+        from training.evaluate_floor import hard_signal
+        df = pd.DataFrame({
+            "deviceIsBlacklisted": [0, 1, 0, 0, 0],
+            "isHighRiskMerchant": [0, 0, 1, 0, 0],
+            "amount": [900.0, 900.0, 900.0, 50_000.0, 50_000.01],   # strictly above ₹50,000, like the amount rule
+        })
+        assert hard_signal(df).tolist() == [False, True, True, False, True]

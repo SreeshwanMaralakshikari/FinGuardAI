@@ -103,6 +103,16 @@ class TestConfig:
         with pytest.raises(ConfigError):
             load_settings(env)
 
+    @pytest.mark.parametrize("key", [
+        "replace-with-64-hex-characters-from-the-command-above",
+        "CHANGE-ME-" + "x" * 30,
+        "changeme" + "y" * 30,
+    ])
+    def test_placeholder_key_refuses_to_start(self, key):
+        # E-04: the .env.example placeholder is long enough for the length check
+        with pytest.raises(ConfigError, match="placeholder"):
+            load_settings({"ML_API_KEY": key})
+
     def test_valid_key(self):
         settings = load_settings({"ML_API_KEY": "k" * 32, "LOG_LEVEL": "debug"})
         assert settings.log_level == "DEBUG"

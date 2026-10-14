@@ -17,6 +17,7 @@
  *   Everything after step 3 is best-effort: the payment is saved, so a failing helper must never
  *   turn the request into a 500 (the customer would retry and pay twice, BE-5).
  */
+import { randomUUID } from 'node:crypto';
 import { scoreTransaction } from './scoringService.js';
 import { createWithSequentialId } from '../utils/generateSequentialId.js';
 import calcBehaviorProfile from '../utils/calcBehaviorProfile.js';
@@ -98,6 +99,8 @@ const plainBreakdown = (breakdown) =>
 export const plainScoring = (scoring) => {
   if (!scoring?.engine) return null;
   const out = { engine: scoring.engine, ruleScore: scoring.ruleScore };
+  if (scoring.mlScore !== undefined) out.mlScore = scoring.mlScore;
+  if (scoring.ruleFloor) out.ruleFloor = true;
   if (scoring.modelVersion !== undefined) out.modelVersion = scoring.modelVersion;
   if (scoring.fraudProbability !== undefined) out.fraudProbability = scoring.fraudProbability;
   if (scoring.fallbackReason !== undefined) out.fallbackReason = scoring.fallbackReason;
@@ -251,11 +254,15 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
 
     // 4. Run fraud detection — no DB side-effects (D-P4-05). Phase 10: the ML model scores the payment
     //    when it is enabled and answers within ML_TIMEOUT_MS; otherwise the pure rule engine does.
+    // E-06: one id per scoring request. It is sent to the ML service (X-Request-Id, in its log line), logged
+    // by scoringService when the rules had to take over, and kept in the TRANSACTION_SUBMITTED audit entry.
+    const scoringRequestId = randomUUID();
     const fraud = await scoreTransaction({
       transaction: transactionInput,
       behaviorProfile: profileForCheck,
       deviceReputation,
       thresholds,
+      requestId: scoringRequestId,
     });
     const { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals, breakdown, scoring } = fraud;
 
@@ -390,7 +397,7 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
       'TRANSACTION_SUBMITTED',
       'Transaction',
       publicId,
-      { amount, merchantName, paymentMethod, riskLevel, fraudScore, status, scoringEngine: scoring.engine },
+      { amount, merchantName, paymentMethod, riskLevel, fraudScore, status, scoringEngine: scoring.engine, scoringRequestId },
       ip
     );
 

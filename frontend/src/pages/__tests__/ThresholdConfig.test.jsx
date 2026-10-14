@@ -47,6 +47,14 @@ function renderThresholdConfig() {
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('ThresholdConfig page', () => {
+  it('E-02: explains which settings the ML model uses and labels the rule-engine-only sections', async () => {
+    renderThresholdConfig();
+    expect(await screen.findByText(/When the ML model is switched on, it decides the fraud score/)).toBeInTheDocument();
+    expect(screen.getByText(/it is flagged as at least MEDIUM even if the model scores it lower/)).toBeInTheDocument();
+    expect(screen.getByText(/the high-value amount still counts as policy/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Rule engine setting \(with the ML model on: fallback and comparison only\)/)).toHaveLength(1);
+  });
+
   it('renders the threshold form fields', async () => {
     renderThresholdConfig();
     await waitFor(() => {

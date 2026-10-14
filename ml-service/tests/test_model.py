@@ -1,3 +1,4 @@
+import itertools
 import json
 import math
 import os
@@ -112,7 +113,7 @@ def test_monotonic_constraints_hold(model):
     for base in bases:
         for name, values in sweeps.items():    # values ordered from safer to riskier
             probs = [model.predict(validate_features({**base, name: v})).probability for v in values]
-            assert all(b >= a - 1e-6 for a, b in zip(probs, probs[1:], strict=False)), (name, base, probs)
+            assert all(b >= a - 1e-6 for a, b in itertools.pairwise(probs)), (name, base, probs)
 
 
 def test_risky_daytime_payment_from_new_device_and_city_is_critical(model):

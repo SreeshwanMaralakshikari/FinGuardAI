@@ -30,7 +30,7 @@ erDiagram
 
 ## Request flow for a payment
 
-`POST /customer-api/transactions` → validators → per-user lock → `services/transactionService.processTransaction`: idempotency replay check → load profile, device reputation and live velocity counts → `services/scoringService.scoreTransaction`: `checkFraud` (pure rule engine) always runs; when `ML_ENABLED=true` the 15 features are sent to the Python ML service (`ml-service/`, XGBoost + SHAP) and its score decides, with the same bands and actions — on a timeout or any error the rule result is used and the reason stored → create transaction with sequential id → alert (HIGH/CRITICAL/MEDIUM) → device reputation, trust score, behaviour profile → audit + notifications + Socket.io events. The admin demo-data generator calls the same service.
+`POST /customer-api/transactions` → validators → per-user lock → `services/transactionService.processTransaction`: idempotency replay check → load profile, device reputation and live velocity counts → `services/scoringService.scoreTransaction`: `checkFraud` (pure rule engine) always runs; when `ML_ENABLED=true` the 15 features are sent to the Python ML service (`ml-service/`, XGBoost + SHAP) and its score decides, with the same bands and actions (alert-only rule floor: a high-risk merchant, blacklisted device or high-value amount keeps the payment at least MEDIUM) — on a timeout or any error the rule result is used and the reason stored → create transaction with sequential id → alert (HIGH/CRITICAL/MEDIUM) → device reputation, trust score, behaviour profile → audit + notifications + Socket.io events. The admin demo-data generator calls the same service.
 
 ## API summary (all JSON, cookie auth; `/health` is public)
 
@@ -40,6 +40,7 @@ erDiagram
 | Customer | `POST /customer-api/transactions` (optional `Idempotency-Key`), `GET /customer-api/transactions`, `GET /customer-api/transactions/:id` | CUSTOMER |
 | | `GET /customer-api/fraud-alerts`, `GET /customer-api/fraud-alerts/:id`, `PATCH /customer-api/fraud-alerts/:id/acknowledge` (MEDIUM only) | CUSTOMER |
 | | `GET /customer-api/timeline`, `GET /customer-api/trust-score`, `GET/PATCH /customer-api/profile` | CUSTOMER |
+| | `POST /customer-api/ml-warm-up` (wakes a sleeping ML service; 202 at once) | CUSTOMER |
 | Notifications | `GET /notification-api/notifications`, `PATCH .../read-all`, `GET .../unread-count`, `PATCH .../:id/read` | CUSTOMER, ANALYST |
 | Analyst | `GET /analyst-api/flagged-transactions`, `GET .../flagged-transactions/:id` (HIGH/CRITICAL only) | ANALYST |
 | | `POST /analyst-api/cases`, `GET /analyst-api/cases`, `GET .../cases/:id`, `PATCH .../cases/:id/assign`, `PATCH .../cases/:id/status`, `POST .../cases/:id/notes` | ANALYST |
@@ -49,7 +50,7 @@ erDiagram
 | | `GET/PATCH /admin-api/thresholds`, `POST /admin-api/thresholds/preview` | ADMIN |
 | | `POST /admin-api/simulation/start`, `.../stop`, `.../generate`, `DELETE .../simulation/data` | ADMIN |
 | | `GET /admin-api/audit-logs` | ADMIN |
-| | `GET /admin-api/ml-status` (Phase 10: engine state + last-24-hour counts) | ADMIN |
+| | `GET /admin-api/ml-status` (Phase 10: engine state + last-24-hour counts; also wakes an idle ML service) | ADMIN |
 
 Errors use `{ success:false, message, errors? }`. Validation errors are HTTP 422; a dead (deactivated) session is 401 with `code:'ACCOUNT_DEACTIVATED'`.
 
@@ -67,6 +68,7 @@ Customer pays ─► backend (transactionService) ─► scoringService
                                                    └─ POST ml-service /predict ──────────┤ ML answer within ML_TIMEOUT_MS?
                                                         (X-API-Key, 15 features)          │   yes → ML score decides
                                                                                           │   no  → rule score decides
+                                                   rule floor (policy signal → ≥ MEDIUM, < HIGH)          │
                                                    decisionForScore (admin bands) ◄──────┘
 ```
 
@@ -74,7 +76,9 @@ Customer pays ─► backend (transactionService) ─► scoringService
   an XGBoost model, and TreeSHAP explanations. Deployed as a second Render free web service.
 * Backend files: `config/mlSettings.js` (env), `services/mlFeatureBuilder.js` (features, same conditions as the
   rules), `services/mlClient.js` (HTTP, timeout, cool-down, wake-up, response validation),
-  `services/scoringService.js` (engine choice).
+  `services/scoringService.js` (engine choice, alert-only rule floor).
+* The ML service sleeps 15 minutes after the last payment (Render free). Opening *Submit transaction* or the admin
+  dashboard wakes it in the background (never on a timer); during a cold start payments go straight to the rules.
 * Frontend: `FraudExplanation` shows the SHAP bars (`MlExplanation`) for ML-scored payments and the rule
   breakdown as a comparison; `MlStatusCard` on the admin dashboard.
 * Off by default: without `ML_ENABLED=true` every payment is scored by the rules exactly as before.

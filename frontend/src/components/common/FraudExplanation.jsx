@@ -2,7 +2,8 @@
  * @file src/components/common/FraudExplanation.jsx
  * @description Phase 10: one place that explains a fraud score, whichever engine produced it.
  *   - scoring.engine 'ML'    → the SHAP explanation, then the rule breakdown labelled as a comparison
- *                              (its points do NOT add up to the ML score, so no "capped" note is shown)
+ *                              (its points do NOT add up to the ML score, so no "capped" note is shown);
+ *                              with scoring.ruleFloor the rule check set the minimum score, and says so
  *   - scoring.engine 'RULES' → the rule breakdown as before, plus a note when ML was on but not used
  *   - no scoring (transactions scored before Phase 10) → exactly the old ScoreBreakdown
  */
@@ -18,7 +19,10 @@ export default function FraudExplanation({ scoring, breakdown, fraudScore }) {
     return (
       <div className="space-y-6">
         <MlExplanation scoring={scoring} />
-        <ScoreBreakdown breakdown={breakdown} title="Rule engine check (for comparison)" />
+        <ScoreBreakdown
+          breakdown={breakdown}
+          title={scoring.ruleFloor ? 'Rule engine check (set the minimum score)' : 'Rule engine check (for comparison)'}
+        />
       </div>
     );
   }

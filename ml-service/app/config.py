@@ -12,10 +12,12 @@ config.py — settings for the ML service, read from environment variables.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 SERVICE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MIN_API_KEY_LENGTH = 32
+PLACEHOLDER_PATTERN = re.compile(r"replace-with|change-me|changeme", re.IGNORECASE)
 MAX_REQUEST_BYTES = 8 * 1024   # a feature payload is ~600 bytes
 
 
@@ -46,6 +48,10 @@ def load_settings(env: dict | None = None) -> Settings:
             f"ML_API_KEY must be set to a random secret of at least {MIN_API_KEY_LENGTH} characters "
             "(generate one with: python -c \"import secrets; print(secrets.token_hex(32))\")"
         )
+    # The .env.example placeholder is long enough to pass the length check, so reject it
+    # explicitly (same rule as the backend's config/mlSettings.js).
+    if PLACEHOLDER_PATTERN.search(api_key):
+        raise ConfigError("ML_API_KEY is still the placeholder from .env.example — generate a random one")
     return Settings(
         api_key=api_key,
         model_dir=env.get("MODEL_DIR") or os.path.join(SERVICE_ROOT, "model"),

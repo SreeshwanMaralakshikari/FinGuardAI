@@ -1,6 +1,11 @@
 // src/tests/setup.js
 import '@testing-library/jest-dom';
 import { configure } from '@testing-library/react';
+import { vi } from 'vitest';
+
+// D-2: the Submit page's fire-and-forget ML wake-up must not consume the api.post mocks of page tests
+// (they count and order POST calls). Its own test (phase10ml) un-mocks it with vi.importActual.
+vi.mock('../api/mlWarmUp.js', () => ({ warmUpMl: vi.fn(() => Promise.resolve(true)) }));
 
 // findBy* / waitFor wait up to 1 s by default. Lazy-loaded pages (App.routing tests) can take longer than
 // that on a slower laptop while all test files run in parallel, which showed up as "still Loading…"

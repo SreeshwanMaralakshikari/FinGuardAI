@@ -46,7 +46,7 @@
       "name": "amount",
       "type": "float",
       "min": 0.01,
-      "max": 100000000,
+      "max": 1000000000,
       "description": "Payment amount in rupees."
     },
     {

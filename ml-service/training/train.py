@@ -19,11 +19,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import platform
 import sys
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -37,7 +38,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import GroupShuffleSplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.features import (  # noqa: E402
+from app.features import (
     CONTRACT_KEYS,
     MODEL_COLUMNS,
     contract_description,
@@ -45,7 +46,7 @@ from app.features import (  # noqa: E402
     to_model_row,
     validate_features,
 )
-from training.rule_engine import DEFAULTS, rule_scores  # noqa: E402
+from training.rule_engine import DEFAULTS, rule_scores
 
 MODEL_VERSION = "fg-xgb-1.1.0"   # 1.1: monotonic constraints
 SEED = 42
@@ -137,7 +138,7 @@ def per_scenario_recall(test: pd.DataFrame, score: np.ndarray, cutoff: float) ->
 
 def calibration_table(y, prob, bins=(0, .05, .25, .5, .75, 1.0001)) -> list:
     table = []
-    for lo, hi in zip(bins[:-1], bins[1:], strict=True):
+    for lo, hi in itertools.pairwise(bins):
         mask = (prob >= lo) & (prob < hi)
         if mask.sum():
             table.append({"range": f"{lo:.2f}-{min(hi, 1):.2f}", "payments": int(mask.sum()),
@@ -221,11 +222,11 @@ def main(argv=None) -> None:
         "dataset": {
             "source": "synthetic (training/generate_data.py) — not real bank data",
             "file": os.path.basename(args.data),
-            "payments": int(len(df)),
+            "payments": len(df),
             "customers": int(df["customerId"].nunique()),
             "fraudRate": round(float(df["label"].mean()), 5),
             "split": "70/15/15 by customer",
-            "testPayments": int(len(test)),
+            "testPayments": len(test),
         },
         "testMetrics": {k: metrics[k] for k in ("ml", "ruleEngine")},
     }

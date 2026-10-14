@@ -75,7 +75,8 @@ export const buildMlFeatures = ({ transaction, behaviorProfile, deviceReputation
 
 // ─── Presentation: label + readable value for each feature (stored with its SHAP value) ────────────
 const yesNo = (v) => (v === 1 ? 'Yes' : 'No');
-const times = (v) => `${Number(v).toFixed(1)}×`;
+// one decimal, Indian digit grouping for large ratios (543478.26 → "5,43,478.3×"), as in the ML reasons
+const times = (v) => `${Number(v).toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}×`;
 
 export const ML_FEATURE_LABELS = Object.freeze({
   amount:                { label: 'Payment amount',                    format: (v) => `₹${formatRupees(v)}` },

@@ -28,11 +28,17 @@ Conventions the Node feature builder must follow (mirrors the rule engine):
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from collections.abc import Callable
 
 PAYMENT_METHODS: tuple[str, ...] = ("UPI", "CARD", "NET_BANKING", "WALLET")
+
+# Largest payment the app accepts: ₹100 crore. MUST equal MAX_AMOUNT in the backend's
+# validators/transactionValidators.js and the form limit in the frontend's
+# SubmitTransaction.jsx (a test in each service pins the value). A smaller limit here made the
+# service reject very large payments with 422, so they could never be ML-scored.
+MAX_AMOUNT = 1_000_000_000
 
 
 @dataclass(frozen=True)
@@ -47,17 +53,38 @@ class NumericFeature:
     reason: Callable[[float], str | None] | None = None
 
 
+def _group_indian(digits: str) -> str:
+    """'12345678' → '1,23,45,678' (Indian grouping: last three digits, then pairs)."""
+    if len(digits) <= 3:
+        return digits
+    head, tail = digits[:-3], digits[-3:]
+    pairs = []
+    while len(head) > 2:
+        pairs.insert(0, head[-2:])
+        head = head[:-2]
+    return ",".join([head, *pairs, tail])
+
+
 def _fmt_inr(value: float) -> str:
-    return f"₹{value:,.2f}".rstrip("0").rstrip(".")
+    """
+    Rupees with Indian digit grouping and at most 2 decimals, trailing zeros dropped —
+    the same text the backend's formatRupees (en-IN) produces, so a reason and the SHAP
+    value beside it show the amount identically: 150000 → '₹1,50,000', 1234.5 → '₹1,234.5'.
+    """
+    whole, _, fraction = f"{value:.2f}".partition(".")
+    fraction = fraction.rstrip("0")
+    return f"₹{_group_indian(whole)}" + (f".{fraction}" if fraction else "")
 
 
 def _times(value: float) -> str:
-    return f"{value:.1f}×"
+    """'21.7×'; large ratios grouped like rupees: 543478.26 → '5,43,478.3×' (same as the backend's label)."""
+    whole, _, fraction = f"{value:.1f}".partition(".")
+    return f"{_group_indian(whole)}.{fraction}×"
 
 
 NUMERIC_FEATURES: tuple[NumericFeature, ...] = (
     NumericFeature(
-        "amount", "float", 0.01, 100_000_000,
+        "amount", "float", 0.01, MAX_AMOUNT,
         "Payment amount in rupees.",
         lambda v: f"Payment amount of {_fmt_inr(v)} raised the risk",
     ),

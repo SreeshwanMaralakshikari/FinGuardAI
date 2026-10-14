@@ -53,6 +53,8 @@
  *   resolveThresholds(thresholds)                      → effective admin settings (defaults per field)
  *   decisionForScore(fraudScore, amount, bands)        → { riskLevel, recommendedAction, estimatedLoss }
  *   findHighRiskMerchant(merchantCategory, configured) → matched high-risk entry or undefined
+ *   hardRuleSignals({ transaction, deviceReputation, thresholds }) → [{ key, type, reason, feature }] for a
+ *                              blacklisted device / high-risk merchant / high-value amount (the ML rule floor)
  */
 
 import { getHourInAppZone } from '../config/timeZone.js';
@@ -107,6 +109,9 @@ const velocityCheck = (transaction, behaviorProfile, thresholds) => {
 };
 
 // ─── Rule evaluator 2 — Amount Anomaly ───────────────────────────────────────
+const highValueReason = (amount, threshold) =>
+  `Transaction amount ₹${formatRupees(amount)} exceeds high-value threshold ₹${formatRupees(threshold)}`;
+
 const amountAnomalyCheck = (transaction, behaviorProfile, thresholds) => {
   const reasons = [];
   let score = 0;
@@ -117,9 +122,7 @@ const amountAnomalyCheck = (transaction, behaviorProfile, thresholds) => {
 
   if (amount > absThreshold) {
     score += 20;
-    reasons.push(
-      `Transaction amount ₹${formatRupees(amount)} exceeds high-value threshold ₹${formatRupees(absThreshold)}`
-    );
+    reasons.push(highValueReason(amount, absThreshold));
   }
 
   if (avgAmount > 0 && amount > avgAmount * 3) {
@@ -156,6 +159,8 @@ const locationCheck = (transaction, behaviorProfile) => {
 };
 
 // ─── Rule evaluator 4 — Device ───────────────────────────────────────────────
+const BLACKLISTED_DEVICE_REASON = 'Device is blacklisted (reputation score below minimum threshold)';
+
 const deviceCheck = (transaction, behaviorProfile, deviceReputation, thresholds) => {
   const reasons = [];
   let score = 0;
@@ -178,7 +183,7 @@ const deviceCheck = (transaction, behaviorProfile, deviceReputation, thresholds)
 
   if (deviceReputation?.isBlacklisted) {
     score += 30;
-    reasons.push('Device is blacklisted (reputation score below minimum threshold)');
+    reasons.push(BLACKLISTED_DEVICE_REASON);
   }
 
   return { score: Math.min(score, 50), reasons, type: 'NEW_DEVICE' };
@@ -237,6 +242,34 @@ const merchantRiskCheck = (transaction, thresholds) => {
   }
 
   return { score: Math.min(score, 35), reasons, type: 'HIGH_RISK_MERCHANT' };
+};
+
+// ─── Hard signals (Phase 10 rule floor) ─────────────────────────────────────────
+/**
+ * The rule findings that are an explicit POLICY, not a statistical hint: a device the system has
+ * blacklisted, a merchant category the admin put on the high-risk list, and an amount above the admin's
+ * high-value threshold. With the ML model on, services/scoringService.js makes sure a payment with one of
+ * them is never rated below MEDIUM when the rules rate it MEDIUM or higher (alert-only floor).
+ * Same conditions and the same reason sentences as deviceCheck / merchantRiskCheck / amountAnomalyCheck.
+ * `feature` is the ML feature that says the same thing, so its (duplicate) model reason can be dropped.
+ * @param {{ transaction: object, deviceReputation?: object|null, thresholds?: object|null }} args
+ * @returns {Array<{ key: string, type: string, reason: string, feature: string }>}  empty when none fired
+ */
+const hardRuleSignals = ({ transaction, deviceReputation = null, thresholds = null }) => {
+  const effective = resolveThresholds(thresholds);
+  const found = [];
+  if (deviceReputation?.isBlacklisted) {
+    found.push({ key: 'BLACKLISTED_DEVICE', type: 'NEW_DEVICE', reason: BLACKLISTED_DEVICE_REASON, feature: 'deviceIsBlacklisted' });
+  }
+  const merchant = merchantRiskCheck(transaction, effective);
+  if (merchant.score > 0) {
+    found.push({ key: 'HIGH_RISK_MERCHANT', type: 'HIGH_RISK_MERCHANT', reason: merchant.reasons[0], feature: 'isHighRiskMerchant' });
+  }
+  const amount = transaction.amount ?? 0;
+  if (amount > effective.amountThreshold) {
+    found.push({ key: 'HIGH_VALUE_AMOUNT', type: 'AMOUNT_ANOMALY', reason: highValueReason(amount, effective.amountThreshold), feature: 'amount' });
+  }
+  return found;
 };
 
 // ─── Rule catalogue for the score breakdown (B-01) — `max` mirrors the Math.min cap of each evaluator ─
@@ -412,4 +445,5 @@ export {
   resolveThresholds,
   decisionForScore,
   findHighRiskMerchant,
+  hardRuleSignals,
 };

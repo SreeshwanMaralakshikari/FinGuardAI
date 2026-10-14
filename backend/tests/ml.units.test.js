@@ -3,8 +3,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from '@je
 import { getMlSettings, validateMlSettings, DEFAULT_ML_TIMEOUT_MS, DEFAULT_ML_COOLDOWN_MS } from '../config/mlSettings.js';
 import { buildMlFeatures, ML_FEATURE_LABELS, ML_FEATURE_ALERT_TYPES } from '../services/mlFeatureBuilder.js';
 import { createMlClient, parsePrediction, MlScoringError } from '../services/mlClient.js';
-import { scoreTransaction, signalsFromReasonFeatures, GENERIC_ML_REASON } from '../services/scoringService.js';
-import { checkFraud, decisionForScore, resolveThresholds } from '../services/fraudDetectionService.js';
+import {
+  scoreTransaction, signalsFromReasonFeatures, signalsForMlAlert, applyRuleFloor, GENERIC_ML_REASON,
+} from '../services/scoringService.js';
+import { checkFraud, decisionForScore, resolveThresholds, hardRuleSignals } from '../services/fraudDetectionService.js';
+import { MAX_AMOUNT } from '../validators/transactionValidators.js';
+import { existsSync, readFileSync } from 'node:fs';
 import { ML_FEATURE_KEYS } from '../utils/enums.js';
 import { startFakeMlService, mlAnswer, FAKE_ML_KEY } from './helpers/fakeMlService.js';
 
@@ -238,15 +242,19 @@ describe('createMlClient against a fake ML service', () => {
     await expect(c.predict(build())).resolves.toMatchObject({ fraudScore: 88 });
   });
 
-  it('cool-down expires after ML_COOLDOWN_MS', async () => {
+  it('cool-down expires after ML_COOLDOWN_MS (the background wake-up failed too)', async () => {
+    // Stubbed fetch, so the wake-up's outcome is deterministic: /health answers 503 (still down).
     let now = 0;
-    fake.respondWith(() => ({ status: 500, body: {} }));
-    const c = client({ now: () => now, cooldownMs: 10_000 });
+    let predictStatus = 500;
+    const res = (status, body) => ({ ok: status < 400, status, json: async () => body, body: { cancel: async () => {} } });
+    const fetchImpl = async (url) => (url.endsWith('/health') ? res(503, {}) : res(predictStatus, predictStatus === 200 ? mlAnswer() : {}));
+    const c = client({ now: () => now, cooldownMs: 10_000, fetchImpl });
     await expect(c.predict(build())).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+    await c.wakeUp();                                     // finished, unsuccessfully: the cool-down stays
     now = 9_999;
     await expect(c.predict(build())).rejects.toMatchObject({ code: 'COOLDOWN' });
     now = 10_000;
-    fake.respondWith(() => ({ status: 200, body: mlAnswer() }));
+    predictStatus = 200;
     await expect(c.predict(build())).resolves.toMatchObject({ fraudScore: 88 });
   });
 
@@ -328,7 +336,8 @@ describe('scoreTransaction', () => {
     const noReasons = (fraudScore) => fakeClient(async () => parsePrediction(mlAnswer({ fraudScore, reasons: [], reasonFeatures: [] })));
     const risky = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: noReasons(55) });
     expect(risky.reasons).toEqual([GENERIC_ML_REASON]);
-    expect(risky.signals).toEqual([]);
+    // E-08: classified by the strongest positive SHAP feature (isNewDevice 3.2), not COMPOSITE
+    expect(risky.signals).toEqual(['NEW_DEVICE']);
     const low = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: noReasons(3) });
     expect(low.reasons).toEqual([]);
     expect(low.riskLevel).toBe('LOW');
@@ -344,5 +353,247 @@ describe('scoreTransaction', () => {
   it('signalsFromReasonFeatures de-duplicates and drops features without an alert type', () => {
     expect(signalsFromReasonFeatures(['amount', 'amountToAvgRatio', 'hasProfile', 'paymentMethod', 'isNewCity']))
       .toEqual(['AMOUNT_ANOMALY', 'LOCATION_DEVIATION']);
+  });
+});
+
+
+// ── Error-check round fixes (E-01, E-06, E-08, D-1 rule floor) ─────────────────────────────────────
+describe('amount limit is the same in all three services (E-01)', () => {
+  const read = (rel) => {
+    const url = new URL(rel, import.meta.url);
+    return existsSync(url) ? readFileSync(url, 'utf8') : null;
+  };
+
+  it('backend validator, ML contract and the payment form all allow exactly ₹100 crore', () => {
+    expect(MAX_AMOUNT).toBe(1_000_000_000);
+    const python = read('../../ml-service/app/features.py');
+    const form = read('../../frontend/src/pages/customer/SubmitTransaction.jsx');
+    // Each service can be checked out alone (Render builds one folder); compare whatever is present.
+    if (python) expect(Number(python.match(/^MAX_AMOUNT = ([\d_]+)$/m)?.[1].replaceAll('_', ''))).toBe(MAX_AMOUNT);
+    if (form) expect(Number(form.match(/max: \{ value: ([\d_]+),/)?.[1].replaceAll('_', ''))).toBe(MAX_AMOUNT);
+  });
+});
+
+describe('hardRuleSignals', () => {
+  const casino = { ...TXN, merchantCategory: 'casino' };
+
+  it('nothing for an ordinary payment', () => {
+    expect(hardRuleSignals({ transaction: TXN, deviceReputation: { reputationScore: 90 }, thresholds: null })).toEqual([]);
+  });
+
+  it('a high-risk merchant (normalised match, admin list) and a blacklisted device', () => {
+    expect(hardRuleSignals({ transaction: casino, deviceReputation: null, thresholds: null })).toEqual([{
+      key: 'HIGH_RISK_MERCHANT', type: 'HIGH_RISK_MERCHANT', reason: 'High-risk merchant category detected: CASINO', feature: 'isHighRiskMerchant',
+    }]);
+    expect(hardRuleSignals({ transaction: TXN, deviceReputation: { reputationScore: 10, isBlacklisted: true }, thresholds: null })).toEqual([{
+      key: 'BLACKLISTED_DEVICE', type: 'NEW_DEVICE', reason: 'Device is blacklisted (reputation score below minimum threshold)', feature: 'deviceIsBlacklisted',
+    }]);
+  });
+
+  it('an amount above the admin high-value threshold (strictly above, like the amount rule)', () => {
+    expect(hardRuleSignals({ transaction: { ...TXN, amount: 60_000 }, deviceReputation: null, thresholds: null })).toEqual([{
+      key: 'HIGH_VALUE_AMOUNT', type: 'AMOUNT_ANOMALY', reason: 'Transaction amount ₹60,000 exceeds high-value threshold ₹50,000', feature: 'amount',
+    }]);
+    expect(hardRuleSignals({ transaction: { ...TXN, amount: 50_000 }, deviceReputation: null, thresholds: null })).toEqual([]);
+    expect(hardRuleSignals({ transaction: { ...TXN, amount: 60_000 }, deviceReputation: null, thresholds: { amountThreshold: 100_000 } })).toEqual([]);
+  });
+
+  it('follows the admin list: a category removed from the list is no longer a hard signal', () => {
+    expect(hardRuleSignals({ transaction: casino, deviceReputation: null, thresholds: { highRiskMerchants: ['CRYPTO_EXCHANGE'] } })).toEqual([]);
+  });
+
+  it('uses exactly the reason sentences of the rule engine', () => {
+    const rules = checkFraud({ transaction: casino, behaviorProfile: null, deviceReputation: { reputationScore: 10, isBlacklisted: true }, thresholds: null });
+    for (const { reason } of hardRuleSignals({ transaction: casino, deviceReputation: { reputationScore: 10, isBlacklisted: true }, thresholds: null })) {
+      expect(rules.reasons).toContain(reason);
+    }
+  });
+});
+
+describe('applyRuleFloor', () => {
+  const bands = { mediumMin: 25, highMin: 50 };
+  it.each([
+    // [mlScore, ruleScore, hard, expected]
+    [0, 35, true, 35],      // casino from a known device: rules' MEDIUM score
+    [0, 80, true, 49],      // capped just below HIGH: the floor alone never holds or blocks
+    [30, 35, true, 35],     // raised within MEDIUM
+    [40, 35, true, null],   // the model is already higher
+    [70, 90, true, null],   // the model holds it anyway
+    [0, 20, true, null],    // the rules themselves say LOW
+    [0, 60, false, null],   // no hard signal: the model decides
+  ])('ml %i, rules %i, hard %s → %s', (ml, rule, hard, expected) => {
+    expect(applyRuleFloor(ml, rule, hard, bands)).toBe(expected);
+  });
+
+  it('uses the admin bands', () => {
+    expect(applyRuleFloor(0, 80, true, { mediumMin: 20, highMin: 40 })).toBe(39);
+    expect(applyRuleFloor(0, 35, true, { mediumMin: 40, highMin: 60 })).toBeNull();
+  });
+});
+
+describe('scoreTransaction with the rule floor', () => {
+  const fakeClient = (answer) => ({ predict: jest.fn(async () => parsePrediction(mlAnswer(answer))), wakeUp: jest.fn(), status: jest.fn() });
+  const profile = { ...PROFILE, transactionVelocity: { perHour: 0, perDay: 1 } };
+  const lowAnswer = { fraudScore: 0, fraudProbability: 0.001, reasons: [], reasonFeatures: [], top: { amount: -0.4 } };
+
+  it('a casino payment the model rates 0 becomes the rules\' MEDIUM score, with the policy reason first', async () => {
+    const tx = { ...TXN, merchantCategory: 'CASINO' };
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: fakeClient(lowAnswer) });
+    const rules = checkFraud({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null });
+    expect(rules.fraudScore).toBe(35);
+    expect(out).toMatchObject({ fraudScore: 35, riskLevel: 'MEDIUM', recommendedAction: 'OTP', signals: ['HIGH_RISK_MERCHANT'] });
+    expect(out.reasons).toEqual(['High-risk merchant category detected: CASINO']);
+    expect(out.scoring).toMatchObject({ engine: 'ML', ruleScore: 35, mlScore: 0, ruleFloor: true });
+    expect(out.scoring.signals).toEqual(['HIGH_RISK_MERCHANT']);   // stored, so an idempotent replay classifies the same way
+    expect(out.scoring.shapValues).toHaveLength(15);               // the model's explanation is still kept
+  });
+
+  it('the floor never goes above MEDIUM, even when the rules alone would block', async () => {
+    const tx = { ...TXN, merchantCategory: 'CASINO', deviceId: 'dev-new', amount: 60_000 };
+    const rep = { reputationScore: 10, isBlacklisted: true };
+    const rules = checkFraud({ transaction: tx, behaviorProfile: profile, deviceReputation: rep, thresholds: null });
+    expect(rules.riskLevel).toBe('CRITICAL');
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: rep, thresholds: null, mlClient: fakeClient(lowAnswer) });
+    expect(out).toMatchObject({ fraudScore: 49, riskLevel: 'MEDIUM', recommendedAction: 'OTP' });
+    expect(out.reasons.slice(0, 2)).toEqual([
+      'Device is blacklisted (reputation score below minimum threshold)',
+      'High-risk merchant category detected: CASINO',
+    ]);
+    expect(out.signals).toEqual(['NEW_DEVICE', 'HIGH_RISK_MERCHANT', 'AMOUNT_ANOMALY']);
+  });
+
+  it('a huge payment from the customer\'s own device and city is at least MEDIUM (the model alone said LOW)', async () => {
+    const tx = { ...TXN, amount: 500_000_000 };          // ₹50 crore; the live model scores this about 2/100
+    const answer = { ...lowAnswer, fraudScore: 2, fraudProbability: 0.02, reasons: ['Payment amount of ₹50,00,00,000 raised the risk'], reasonFeatures: ['amount'], top: { amount: 0.2 } };
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: fakeClient(answer) });
+    expect(out).toMatchObject({ fraudScore: 35, riskLevel: 'MEDIUM', signals: ['AMOUNT_ANOMALY'] });
+    // the rule sentence replaces the model's sentence about the same fact (no duplicate)
+    expect(out.reasons).toEqual(['Transaction amount ₹50,00,00,000 exceeds high-value threshold ₹50,000']);
+    expect(out.scoring).toMatchObject({ mlScore: 2, ruleScore: 35, ruleFloor: true });
+  });
+
+  it('a model score above the floor is left alone (no ruleFloor flag)', async () => {
+    const tx = { ...TXN, merchantCategory: 'CASINO' };
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: fakeClient({ fraudScore: 88 }) });
+    expect(out).toMatchObject({ fraudScore: 88, riskLevel: 'CRITICAL' });
+    expect(out.scoring).toMatchObject({ mlScore: 88 });
+    expect(out.scoring.ruleFloor).toBeUndefined();
+  });
+
+  it('no hard signal: a LOW model score stays LOW although the rules say MEDIUM', async () => {
+    const tx = { ...TXN, deviceId: 'dev-new', location: { city: 'Delhi' } }; // new device + new city = 35 for the rules
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: fakeClient(lowAnswer) });
+    expect(out.scoring.ruleScore).toBeGreaterThanOrEqual(25);
+    expect(out).toMatchObject({ fraudScore: 0, riskLevel: 'LOW', reasons: [] });
+    expect(out.scoring.ruleFloor).toBeUndefined();
+  });
+});
+
+describe('signalsForMlAlert (E-08)', () => {
+  const prediction = (reasonFeatures, top) => parsePrediction(mlAnswer({
+    reasons: reasonFeatures.map((f) => `reason for ${f}`), reasonFeatures, top,
+  }));
+
+  it('uses the reason features when they map to alert types', () => {
+    expect(signalsForMlAlert(prediction(['isNewCity'], { isNewCity: 1 }), ['NEW_DEVICE'])).toEqual(['LOCATION_DEVIATION']);
+  });
+
+  it('otherwise the strongest positive SHAP feature with a type', () => {
+    expect(signalsForMlAlert(prediction(['hasProfile'], { hasProfile: 2, txnsLastHour: 1.5, isNewDevice: 0.5 }), []))
+      .toEqual(['VELOCITY_BREACH']);
+  });
+
+  it('otherwise the rule engine\'s signals', () => {
+    expect(signalsForMlAlert(prediction([], { hasProfile: 2, paymentMethod: 1 }), ['AMOUNT_ANOMALY'])).toEqual(['AMOUNT_ANOMALY']);
+  });
+});
+
+describe('ML fallback logging (E-06)', () => {
+  it('a fallback other than COOLDOWN is logged with the request id; COOLDOWN is not', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const failing = (code) => ({ predict: jest.fn(async () => { throw new MlScoringError(code, 'x'); }), wakeUp: jest.fn(), status: jest.fn() });
+    await scoreTransaction({ transaction: TXN, behaviorProfile: null, deviceReputation: null, thresholds: null, requestId: 'req-42', mlClient: failing('TIMEOUT') });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('req-42'));
+    warn.mockClear();
+    await scoreTransaction({ transaction: TXN, behaviorProfile: null, deviceReputation: null, thresholds: null, requestId: 'req-43', mlClient: failing('COOLDOWN') });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('ML wake-up on visits (D-2)', () => {
+  const json = (status, body) => ({ ok: status < 400, status, json: async () => body, body: { cancel: async () => {} } });
+  /** fetch stub: /health resolves when `release()` is called (a cold start), /predict answers at once. */
+  const coldService = () => {
+    const calls = [];
+    let release;
+    const health = new Promise((r) => { release = () => r(json(200, { status: 'ok', modelVersion: 'fg-xgb-test' })); });
+    const fetchImpl = async (url) => {
+      calls.push(url.endsWith('/health') ? 'health' : 'predict');
+      return url.endsWith('/health') ? health : json(200, mlAnswer());
+    };
+    return { calls, fetchImpl, release: () => release() };
+  };
+  const make = (svc, clock) => createMlClient({
+    url: 'https://ml.example.com', apiKey: KEY, timeoutMs: 2500, cooldownMs: 60_000,
+    fetchImpl: svc.fetchImpl, now: () => clock.t, logger: { warn() {}, error() {} },
+  });
+
+  it('wakeUpIfIdle starts one wake-up when nothing was heard for 10 minutes, none while it runs', async () => {
+    const svc = coldService();
+    const clock = { t: 1_000_000 };
+    const c = make(svc, clock);
+    expect(c.wakeUpIfIdle()).toBe(true);
+    expect(c.wakeUpIfIdle()).toBe(true);              // already running: no second request
+    expect(svc.calls).toEqual(['health']);
+    expect(c.status().waking).toBe(true);
+    svc.release();
+    await c.wakeUp();                                 // the same in-flight promise
+    expect(c.status()).toMatchObject({ waking: false, modelVersion: 'fg-xgb-test' });
+    clock.t += 9 * 60_000;
+    expect(c.wakeUpIfIdle()).toBe(false);             // answered 9 minutes ago: awake
+    clock.t += 2 * 60_000;
+    expect(c.wakeUpIfIdle()).toBe(true);              // 11 minutes: may be asleep again
+  });
+
+  it('a successful prediction also counts as contact', async () => {
+    const svc = coldService();
+    const clock = { t: 5_000_000 };
+    const c = make(svc, clock);
+    await c.predict(build());
+    expect(c.wakeUpIfIdle()).toBe(false);
+    expect(svc.calls).toEqual(['predict']);
+  });
+
+  it('while a cold start is running (> 2 s, no answer yet) a payment skips straight to the rules', async () => {
+    const svc = coldService();
+    const clock = { t: 9_000_000 };
+    const c = make(svc, clock);
+    c.wakeUpIfIdle();
+    clock.t += 2_500;                                 // /health still pending after 2.5 s: a cold start
+    await expect(c.predict(build())).rejects.toMatchObject({ code: 'COOLDOWN' });
+    expect(svc.calls).toEqual(['health']);            // no /predict request was sent into the cold start
+    svc.release();
+    await c.wakeUp();
+    await expect(c.predict(build())).resolves.toMatchObject({ fraudScore: 88 });
+  });
+
+  it('a payment within the first 2 s of a wake-up is still sent (a warm service answers /health at once)', async () => {
+    const svc = coldService();
+    const clock = { t: 9_000_000 };
+    const c = make(svc, clock);
+    c.wakeUpIfIdle();
+    clock.t += 500;
+    await expect(c.predict(build())).resolves.toMatchObject({ fraudScore: 88 });
+    clock.t += 5_000;                                 // the service answered a payment since the wake-up began
+    await expect(c.predict(build())).resolves.toMatchObject({ fraudScore: 88 });
+  });
+});
+
+describe('ML labels format like the ML reasons (E-05)', () => {
+  it('ratios: one decimal, Indian grouping', () => {
+    expect(ML_FEATURE_LABELS.amountToAvgRatio.format(21.74)).toBe('21.7×');
+    expect(ML_FEATURE_LABELS.amountToMaxRatio.format(543478.26)).toBe('5,43,478.3×');
+    expect(ML_FEATURE_LABELS.amount.format(150000)).toBe('₹1,50,000');
   });
 });

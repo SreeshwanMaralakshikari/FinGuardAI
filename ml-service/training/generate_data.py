@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.features import CONTRACT_KEYS, PAYMENT_METHODS  # noqa: E402
+from app.features import CONTRACT_KEYS, PAYMENT_METHODS
 
 # ─── Profile semantics (mirror calcBehaviorProfile) ──────────────────────────
 PROFILE_TOP_CITIES = 5
@@ -145,7 +145,7 @@ def _legit_hour(c: Customer, rng) -> int:
     if rng.random() < 0.08:                                     # occasional off-pattern hour
         return int(rng.integers(0, 24))
     peak = rng.choice(c.hour_peaks)
-    return int(round(rng.normal(peak, 1.6))) % 24
+    return round(rng.normal(peak, 1.6)) % 24
 
 
 def _event(c, t, scenario, amount, city, device, method, merchant):
@@ -363,7 +363,7 @@ def simulate(n_customers: int, days: int, seed: int,
         c = customers[e["cid"]]
         t = e["t"]
         # +1e-9 guards float error: t = day + 7/24 must read as hour 7, not 6.999…
-        hour = int(math.floor((t % 1) * 24 + 1e-9)) % 24
+        hour = math.floor((t % 1) * 24 + 1e-9) % 24
 
         has_profile = c.n_legit > 0
         avg = c.sum_legit / c.n_legit if has_profile else 0.0

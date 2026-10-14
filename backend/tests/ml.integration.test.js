@@ -16,6 +16,7 @@ import { checkFraud } from '../services/fraudDetectionService.js';
 import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
 import BehaviorProfileModel from '../models/BehaviorProfileModel.js';
+import AuditLogModel from '../models/AuditLogModel.js';
 import app from '../app.js';
 
 let fake;
@@ -53,7 +54,10 @@ const submit = async (user, o = {}, idempotencyKey) =>
 /** A supertest request carrying a freshly signed session cookie for `user` (same token shape as CommonAPI). */
 const asUser = (user) => {
   const token = jwt.sign({ id: user._id, iatMs: Date.now() }, process.env.JWT_SECRET, { expiresIn: '1h' });
-  return { get: (url) => supertest(app).get(url).set('Cookie', `token=${token}`) };
+  return {
+    get: (url) => supertest(app).get(url).set('Cookie', `token=${token}`),
+    post: (url) => supertest(app).post(url).set('Cookie', `token=${token}`).set('Origin', process.env.FRONTEND_URL),
+  };
 };
 
 describe('ML engine in processTransaction', () => {
@@ -168,6 +172,31 @@ describe('ML engine in processTransaction', () => {
   });
 });
 
+describe('rule floor and request id in the real pipeline', () => {
+  it('a casino payment the model rates 0 is stored as MEDIUM (approved, alert) with ruleFloor and mlScore', async () => {
+    fake.respondWith(() => ({ body: mlAnswer({ fraudScore: 0, fraudProbability: 0.002, reasons: [], reasonFeatures: [], top: { amount: -0.3 } }) }));
+    const { user } = await seedUser();
+    const { transaction, alert } = await submit(user, { merchantCategory: 'CASINO', merchantName: 'Lucky Star' });
+
+    expect(transaction).toMatchObject({ fraudScore: 35, riskLevel: 'MEDIUM', recommendedAction: 'OTP', status: 'APPROVED' });
+    expect(transaction.reasons).toEqual(['High-risk merchant category detected: CASINO']);
+    const stored = await TransactionModel.findById(transaction._id).lean();
+    expect(stored.scoring).toMatchObject({ engine: 'ML', mlScore: 0, ruleScore: 35, ruleFloor: true, signals: ['HIGH_RISK_MERCHANT'] });
+    expect(await FraudAlertModel.findById(alert._id).lean()).toMatchObject({ alertType: 'HIGH_RISK_MERCHANT', riskLevel: 'MEDIUM', scoringEngine: 'ML' });
+    // returned to the client with the new fields
+    expect(buildTransactionResponse(transaction, alert).scoring).toMatchObject({ mlScore: 0, ruleFloor: true });
+  });
+
+  it('the X-Request-Id sent to the ML service is kept in the TRANSACTION_SUBMITTED audit entry (E-06)', async () => {
+    const { user } = await seedUser();
+    const { transaction } = await submit(user);
+    const sentId = fake.requests[0].headers['x-request-id'];
+    expect(sentId).toMatch(/^[0-9a-f-]{36}$/);
+    const entry = await AuditLogModel.findOne({ action: 'TRANSACTION_SUBMITTED', entityId: transaction.publicId }).lean();
+    expect(entry.metadata).toMatchObject({ scoringEngine: 'ML', scoringRequestId: sentId });
+  });
+});
+
 describe('GET /admin-api/ml-status', () => {
   it('admin sees the engine state and how the last 24 hours were scored; no secrets', async () => {
     const { user } = await seedUser();
@@ -200,5 +229,43 @@ describe('GET /admin-api/ml-status', () => {
     const res = await asUser(user).get(`/customer-api/transactions/${transaction._id}`);
     expect(res.status).toBe(200);
     expect(res.body.data.transaction.scoring).toMatchObject({ engine: 'ML', shapValues: expect.any(Array) });
+  });
+});
+
+describe('ML wake-up on visits (D-2)', () => {
+  it('POST /customer-api/ml-warm-up starts a wake-up once, answers at once (202)', async () => {
+    const client = createMlClient({ url: fake.url, apiKey: FAKE_ML_KEY, timeoutMs: 500, cooldownMs: 0 });
+    setMlClientForTests(client);
+    const { user } = await seedUser();
+    const first = await asUser(user).post('/customer-api/ml-warm-up');
+    expect(first.status).toBe(202);
+    expect(first.body.data).toEqual({ mlEnabled: true, warming: true });
+    await client.wakeUp();                                     // let the background /health finish
+    expect(client.status()).toMatchObject({ waking: false, modelVersion: 'fg-xgb-test' });
+    const again = await asUser(user).post('/customer-api/ml-warm-up');
+    expect(again.body.data).toEqual({ mlEnabled: true, warming: false }); // answered just now: nothing to do
+  });
+
+  it('with ML off it does nothing; only customers may call it', async () => {
+    setMlClientForTests(null);
+    const { user } = await seedUser();
+    const res = await asUser(user).post('/customer-api/ml-warm-up');
+    expect(res.status).toBe(202);
+    expect(res.body.data).toEqual({ mlEnabled: false, warming: false });
+    const { user: admin } = await seedAdmin();
+    expect((await asUser(admin).post('/customer-api/ml-warm-up')).status).toBe(403);
+  });
+
+  it('opening the admin dashboard (GET /admin-api/ml-status) wakes an idle ML service', async () => {
+    const client = createMlClient({ url: fake.url, apiKey: FAKE_ML_KEY, timeoutMs: 500, cooldownMs: 0 });
+    setMlClientForTests(client);
+    const { user: admin } = await seedAdmin();
+    expect(client.status().modelVersion).toBeNull();          // never contacted yet
+    const res = await asUser(admin).get('/admin-api/ml-status');
+    expect(res.body.data.enabled).toBe(true);
+    // the wake-up started by the request is either still running or already answered (fast local fake)
+    expect(res.body.data.waking || res.body.data.modelVersion === 'fg-xgb-test').toBe(true);
+    await client.wakeUp();
+    expect(client.status().modelVersion).toBe('fg-xgb-test');
   });
 });

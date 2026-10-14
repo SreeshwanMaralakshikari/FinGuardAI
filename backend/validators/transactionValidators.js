@@ -4,7 +4,9 @@ import { PAYMENT_METHODS } from '../utils/enums.js';
 /** C-01: format of the optional Idempotency-Key request header. */
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,100}$/;
 const MIN_AMOUNT = 0.01;
-const MAX_AMOUNT = 1_000_000_000;
+// Largest payment: ₹100 crore. MUST equal MAX_AMOUNT in ml-service/app/features.py and the form limit in the
+// frontend (tests/ml.units.test.js checks all three), or very large payments cannot be ML-scored (E-01).
+export const MAX_AMOUNT = 1_000_000_000;
 /** E-07: money has 2 decimals — round half up, with a tiny epsilon against 1.005 → 1.00 float noise. */
 const roundToPaise = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 

@@ -18,6 +18,10 @@
  *   B-07: "Preview impact" POSTs the three score bands to /admin-api/thresholds/preview and shows how the last
  *   30 days of stored scores would be re-banded (current vs proposed counts, moved up / down). It never
  *   saves, is disabled while the three fields are invalid, and its result is hidden once a field changes.
+ *   E-02 (Phase 10): with the ML model on, the risk bands decide the band of every payment, and the high-risk
+ *   merchant list and high-value amount act as policy (the alert-only rule floor: at least MEDIUM); the
+ *   new-device penalty and velocity limits only drive the rule engine (fallback, comparison view). A static note
+ *   says so, and the two sections carry a one-line hint.
  */
 import { useEffect, useState } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
@@ -31,6 +35,17 @@ import Spinner from '../../components/common/Spinner.jsx';
 import FormField from '../../components/common/FormField.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
+
+/** E-02: which settings the Phase 10 ML model uses (shown whether or not ML is on — it is always true). */
+const ML_NOTE = 'When the ML model is switched on, it decides the fraud score and these settings work differently. '
+  + 'The risk bands apply to every payment. The high-risk merchant list and the high-value amount are policy: when the rule '
+  + 'engine rates a payment at a listed merchant, above the high-value amount or from a blacklisted device as MEDIUM or higher, '
+  + 'it is flagged as at least MEDIUM even if the model scores it lower. '
+  + 'The new-device penalty and the velocity limits only change the rule engine — the automatic fallback when the model is '
+  + 'unavailable and the "for comparison" view.';
+const RULE_ENGINE_ONLY = 'Rule engine setting (with the ML model on: fallback and comparison only).';
+const AMOUNT_DEVICE_HINT = 'With the ML model on, the high-value amount still counts as policy (see the note above); '
+  + 'the new-device penalty only changes the rule engine (fallback and comparison).';
 
 const DEFAULTS = {
   amountThreshold: 50000,
@@ -155,13 +170,15 @@ export default function ThresholdConfig() {
 
       <div className="mb-4 space-y-2">
         <Alert tone="warning">{state.unseeded ? 'The system configuration has not been created yet. Saving will create it with the values below.' : ''}</Alert>
+        <Alert tone="info">{ML_NOTE}</Alert>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-6">
         <Alert tone="error">{saveError}</Alert>
 
         <section className={`${CARD.base} ${CARD.body}`} aria-labelledby="th-amount">
-          <h2 id="th-amount" className="mb-4 text-base font-semibold text-gray-900">Amount &amp; device</h2>
+          <h2 id="th-amount" className="text-base font-semibold text-gray-900">Amount &amp; device</h2>
+          <p className="mb-4 mt-1 text-xs text-gray-500">{AMOUNT_DEVICE_HINT}</p>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <FormField name="amountThreshold" label="High-value amount (₹)" errors={errors}
               render={(p) => <input {...p} type="number" step="any" {...register('amountThreshold', { ...num, required: 'Required', min: { value: 0, message: 'Must be 0 or more' }, max: { value: 1e9, message: 'Cannot exceed 1,000,000,000' } })} />} />
@@ -171,7 +188,8 @@ export default function ThresholdConfig() {
         </section>
 
         <section className={`${CARD.base} ${CARD.body}`} aria-labelledby="th-velocity">
-          <h2 id="th-velocity" className="mb-4 text-base font-semibold text-gray-900">Velocity limits</h2>
+          <h2 id="th-velocity" className="text-base font-semibold text-gray-900">Velocity limits</h2>
+          <p className="mb-4 mt-1 text-xs text-gray-500">{RULE_ENGINE_ONLY}</p>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             <FormField name="velocityLimit.maxPerHour" label="Max transactions per hour" errors={errors}
               render={(p) => (

@@ -12,6 +12,14 @@
  *       the cool-down ends early.
  *   A 422 (our feature payload broke the contract — a bug) is logged loudly but causes no cool-down.
  *
+ *   D-2: the ML service also sleeps while people use the rest of the app (it only gets traffic from payments).
+ *   wakeUpIfIdle() starts the same background wake-up when nothing was heard from the service for 10 minutes;
+ *   the backend calls it when a customer opens "Submit transaction" and when an admin opens the dashboard,
+ *   so the service is usually awake before the payment arrives. It never runs on a timer (no Render hours
+ *   are used beyond real visits). While a wake-up has been running for more than WAKE_SKIP_AFTER_MS (a cold
+ *   start — a warm service answers /health at once) and nothing has answered since it began, predict() does
+ *   not wait for its own timeout: it skips straight to the rules with COOLDOWN.
+ *
  *   Error codes (stored as Transaction.scoring.fallbackReason):
  *     TIMEOUT · UNAVAILABLE (network error / 5xx) · AUTH (401) · CONTRACT (422) ·
  *     INVALID_RESPONSE (answer failed validation) · COOLDOWN (skipped while the service wakes) · ERROR
@@ -21,6 +29,8 @@ import { ML_FEATURE_KEYS, ML_FALLBACK_REASONS } from '../utils/enums.js';
 export { ML_FALLBACK_REASONS };
 
 const WAKE_TIMEOUT_MS = 90_000;           // a Render free instance can take ~1 minute to start
+const WAKE_SKIP_AFTER_MS = 2_000;         // a wake-up still running after this is a cold start
+export const WARM_IDLE_MS = 10 * 60_000;  // Render sleeps after 15 min; nothing heard for 10 min → wake it
 const MAX_REASONS = 10;
 const MAX_TEXT = 300;
 const FEATURE_SET = new Set(ML_FEATURE_KEYS);
@@ -36,6 +46,11 @@ export class MlScoringError extends Error {
 }
 
 const isFiniteNumber = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/** E-09: release an answer whose body is not read, so its connection is freed now rather than at GC. */
+const discardBody = async (res) => {
+  try { await res.body?.cancel(); } catch { /* already consumed or closed */ }
+};
 const isShortString = (v, max = MAX_TEXT) => typeof v === 'string' && v.length > 0 && v.length <= max;
 
 /**
@@ -90,6 +105,8 @@ export const createMlClient = ({
 }) => {
   let cooldownUntil = 0;
   let wakeInFlight = null;
+  let wakeStartedAt = 0;
+  let lastContactAt = 0;                   // last time the service answered (predict or /health)
   const state = { lastSuccessAt: null, lastFailureAt: null, lastFailureCode: null, modelVersion: null };
 
   const headers = (requestId) => ({
@@ -107,6 +124,7 @@ export const createMlClient = ({
   /** Background GET /health; ends the cool-down when the service answers. Never throws, one at a time. */
   const wakeUp = () => {
     if (wakeInFlight) return wakeInFlight;
+    wakeStartedAt = now();
     wakeInFlight = (async () => {
       try {
         const res = await fetchImpl(`${url}/health`, { signal: AbortSignal.timeout(WAKE_TIMEOUT_MS) });
@@ -114,8 +132,10 @@ export const createMlClient = ({
           const body = await res.json().catch(() => ({}));
           if (isShortString(body?.modelVersion, 64)) state.modelVersion = body.modelVersion;
           cooldownUntil = 0;
+          lastContactAt = now();
           return true;
         }
+        await discardBody(res);
         return false;
       } catch {
         return false;
@@ -126,6 +146,14 @@ export const createMlClient = ({
     return wakeInFlight;
   };
 
+  /** D-2: wake the service in the background unless it answered recently. @returns {boolean} a wake-up runs */
+  const wakeUpIfIdle = (idleMs = WARM_IDLE_MS) => {
+    if (wakeInFlight) return true;
+    if (now() - lastContactAt < idleMs) return false; // heard from it recently: it is awake
+    void wakeUp();
+    return true;
+  };
+
   /**
    * Score one payment. Resolves with the validated prediction or throws MlScoringError.
    * @param {Record<string, number|string>} features  from buildMlFeatures
@@ -133,6 +161,9 @@ export const createMlClient = ({
    */
   const predict = async (features, { requestId } = {}) => {
     if (now() < cooldownUntil) throw new MlScoringError('COOLDOWN', 'ML service is cooling down after a failure');
+    if (wakeInFlight && now() - wakeStartedAt > WAKE_SKIP_AFTER_MS && lastContactAt < wakeStartedAt) {
+      throw new MlScoringError('COOLDOWN', 'ML service is still starting up');
+    }
 
     let res;
     try {
@@ -151,6 +182,7 @@ export const createMlClient = ({
     }
 
     if (res.status === 401) {
+      await discardBody(res);
       markFailure('AUTH');
       logger.error('[mlClient] ML service rejected the API key (401) — ML_API_KEY must match on both services');
       throw new MlScoringError('AUTH', 'ML service rejected the API key');
@@ -163,6 +195,7 @@ export const createMlClient = ({
       throw new MlScoringError('CONTRACT', 'ML service rejected the feature payload');
     }
     if (!res.ok) {
+      await discardBody(res);
       markFailure('UNAVAILABLE');
       void wakeUp();
       throw new MlScoringError('UNAVAILABLE', `ML service answered HTTP ${res.status}`);
@@ -185,6 +218,7 @@ export const createMlClient = ({
       throw err;
     }
     state.lastSuccessAt = new Date(now());
+    lastContactAt = now();
     state.modelVersion = prediction.modelVersion;
     return prediction;
   };
@@ -196,8 +230,9 @@ export const createMlClient = ({
     cooldownMs,
     coolingDown: now() < cooldownUntil,
     cooldownEndsAt: now() < cooldownUntil ? new Date(cooldownUntil) : null,
+    waking: wakeInFlight !== null,
     ...state,
   });
 
-  return { predict, wakeUp, status };
+  return { predict, wakeUp, wakeUpIfIdle, status };
 };

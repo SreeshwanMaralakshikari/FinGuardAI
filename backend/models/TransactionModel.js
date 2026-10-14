@@ -41,6 +41,8 @@ const scoringSchema = new Schema(
   {
     engine:           { type: String, enum: [...SCORING_ENGINES], required: true },
     ruleScore:        { type: Number, min: 0, max: 100, required: true },  // the rule engine's score, for comparison
+    mlScore:          { type: Number, min: 0, max: 100 },                  // the model's own score (engine ML)
+    ruleFloor:        { type: Boolean },                                   // true: a hard rule signal raised the ML score
     modelVersion:     { type: String, maxlength: 64 },
     fraudProbability: { type: Number, min: 0, max: 1 },
     fallbackReason:   { type: String, enum: [...ML_FALLBACK_REASONS] },     // only when ML was enabled but not used

@@ -25,14 +25,16 @@ ml-service/
 ├── training/
 │   ├── generate_data.py  Synthetic payment history in FinGuardAI's own schema
 │   ├── rule_engine.py    Exact Python port of checkFraud() — the comparison baseline
-│   └── train.py          Train, evaluate, export model + reports
+│   ├── train.py          Train, evaluate, export model + reports
+│   └── evaluate_floor.py Measures the backend's alert-only rule floor on the same test set
 ├── model/
 │   ├── fraud_model.json  Trained XGBoost model (committed — Render's disk is wiped on restart)
 │   └── model_meta.json   Version, columns, contract, parameters, test metrics
 ├── reports/
 │   ├── metrics.json      Full test-set metrics, ML vs rules
+│   ├── rule_floor_metrics.json  ML only vs ML + rule floor vs rules
 │   └── shap_summary.png  SHAP beeswarm plot for the report/PPT
-├── tests/              86 pytest tests
+├── tests/              106 pytest tests
 ├── wsgi.py             gunicorn entry point (and local dev server)
 ├── gunicorn.conf.py    1 worker × 4 threads, sized for a 512 MB free instance
 ├── requirements.txt        Serving only (what Render installs)
@@ -120,6 +122,32 @@ Fraud caught at HIGH, by scenario:
 The model is well calibrated (Brier score 0.0021): payments it rates 75–100 %
 are fraud 94.6 % of the time.
 
+### The backend's rule floor (alert only)
+
+The backend lets the model decide, with one exception (`backend/services/scoringService.js`):
+when the rule engine sees a **policy** signal — a merchant category on the admin's high-risk
+list, a blacklisted device, or an amount above the admin's high-value threshold — and itself
+rates the payment MEDIUM or higher, the score is raised to the rule score, **capped just below
+HIGH**. So such a payment always raises an alert, but only the model can hold or block it.
+
+Why: the model learned that these facts alone are not fraud. It scores a casino payment from a
+known device, and even a ₹50 crore payment from the customer's own phone and city, at about
+1–2 out of 100. An admin who lists a merchant category or sets a high-value limit expects those
+payments to be flagged.
+
+Measured with `python -m training.evaluate_floor` (writes `reports/rule_floor_metrics.json`):
+
+| Test set | ML only | ML + rule floor (used) | Uncapped floor (rejected) |
+|---|---|---|---|
+| At HIGH — precision / recall | 0.912 / 0.682 | **0.912 / 0.682** | 0.653 / 0.711 |
+| At HIGH — false alarms | 47 | **47** | 269 |
+| At MEDIUM — share of payments alerted | 0.56 % | 2.63 % | 2.63 % |
+| At MEDIUM — mule cash-outs caught | 54.7 % | **84.9 %** | 84.9 % |
+
+The floor changes nothing at HIGH (holds and blocks); it adds MEDIUM alerts, which approve the
+payment and notify the customer. The uncapped version would hold honest high-value and casino
+payments again, so it was rejected.
+
 **Monotonic constraints.** The model is trained so that a riskier value of a
 feature can never lower the score (a larger amount-to-average ratio, more
 payments in the last hour, a new device or city, a lower device trust score…).
@@ -142,11 +170,13 @@ judged worth the small drop. `tests/test_model.py` checks the constraints hold.
    engine.** The victim pays from their own phone, in their own city, at a
    normal-looking amount. Catching these needs a customer confirmation step
    (the deferred "Was this you?" feature, B-05), not a better score.
-4. **High-risk merchants**: the rules catch more mule cash-outs, and a single
-   casino payment from a known device scores LOW with the model but MEDIUM with
-   the rules. Some honest customers in the data pay casinos and crypto exchanges
-   regularly, and the contract has no "first time at this kind of merchant"
-   feature, so the model does not treat the category as decisive on its own.
+4. **High-risk merchants and large amounts**: on its own the model scores a
+   casino payment from a known device, or a very large payment from the
+   customer's own device and city, as LOW. Some honest customers in the data pay
+   casinos regularly or make occasional large payments, and the contract has no
+   "first time at this kind of merchant" feature. The backend's alert-only rule
+   floor (above) makes such payments MEDIUM, so they are no longer missed, but
+   the model itself does not treat these facts as decisive.
 5. **`deviceIsBlacklisted` never fires in the training data** (no simulated
    device fell below a trust score of 30), so the model leans on the trust score
    itself; the rule engine still adds its blacklist points.
@@ -166,6 +196,9 @@ python -m training.generate_data --customers 8000 --days 120 --seed 42 --out dat
 
 # 2. Train + evaluate (~30 s) → model/, reports/
 python -m training.train --data data/synthetic_transactions.csv
+
+# 2b. (optional) Measure the backend's rule floor → reports/rule_floor_metrics.json
+python -m training.evaluate_floor --data data/synthetic_transactions.csv
 
 # 3. Tests
 python -m pytest -q

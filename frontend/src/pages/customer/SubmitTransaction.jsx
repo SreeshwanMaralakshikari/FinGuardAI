@@ -17,8 +17,9 @@
  *   N-18: the API accepts ANY merchantCategory string (no enum), and admins can add categories on
  *   the Thresholds page, so the field is free text with a suggestion list (datalist) instead of
  *   a closed <select>. City is trimmed and sent as typed (the backend normalises its case).
+ *   D-2: opening the page asks the backend to wake the sleeping ML service (fire-and-forget, api/mlWarmUp.js).
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { useAppDispatch } from '../../store/hooks.js';
@@ -27,6 +28,7 @@ import { BTN, CARD, formatCurrency, formatDate } from '../../utils/common.js';
 import { PAYMENT_METHODS } from '../../utils/constants.js';
 import { getDeviceId, newIdempotencyKey } from '../../utils/device.js';
 import { stripBlank } from '../../utils/forms.js';
+import { warmUpMl } from '../../api/mlWarmUp.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
 import FormField from '../../components/common/FormField.jsx';
 import Alert from '../../components/common/Alert.jsx';
@@ -105,6 +107,7 @@ export default function SubmitTransaction() {
   const [result, setResult] = useState(null);
   const [serverError, setServerError] = useState('');
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey); // C-01: one key per payment attempt
+  useEffect(() => { warmUpMl(); }, []); // D-2: start the ML service while the form is being filled in
   const {
     register, handleSubmit, reset, formState: { errors, isSubmitting },
   } = useForm({

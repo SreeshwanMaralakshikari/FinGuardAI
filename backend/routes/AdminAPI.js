@@ -772,6 +772,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const settings = getMlSettings();
     const client = getMlClient();
+    // D-2: opening the dashboard also wakes a sleeping ML service (status() then reports `waking`).
+    client?.wakeUpIfIdle();
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const counts = await TransactionModel.aggregate([
       { $match: { timestamp: { $gte: since } } },
@@ -788,6 +790,7 @@ router.get(
       cooldownMs: settings.cooldownMs,
       coolingDown: false,
       cooldownEndsAt: null,
+      waking: false,
       lastSuccessAt: null,
       lastFailureAt: null,
       lastFailureCode: null,

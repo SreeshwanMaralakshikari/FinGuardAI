@@ -28,7 +28,7 @@ DEFAULTS = {
 
 def _js_round(x: float) -> int:
     """JavaScript Math.round (halves round up), not Python's banker's rounding."""
-    return int(math.floor(x + 0.5))
+    return math.floor(x + 0.5)
 
 
 def rule_score_row(r: dict, t: dict = DEFAULTS) -> int:

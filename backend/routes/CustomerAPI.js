@@ -9,6 +9,7 @@ import { customerAlertsQueryRules, customerTransactionsQueryRules, customerTimel
 import uploadMiddleware, { requireImageContent } from '../middleware/uploadMiddleware.js';
 import createAuditLog from '../utils/createAuditLog.js';
 import { processTransaction, buildTransactionResponse } from '../services/transactionService.js';
+import { getMlClient } from '../services/scoringService.js';
 import { buildDateRange } from '../utils/dateRange.js';
 import { OUTCOME_TITLES } from '../utils/caseWorkflow.js';
 import { formatRupees } from '../utils/normalize.js';
@@ -49,6 +50,17 @@ router.post(
     });
   })
 );
+
+// ── POST /customer-api/ml-warm-up ──────────────────────────────────────────────
+// D-2: the "Submit transaction" page calls this when it opens. The ML service sleeps after 15 minutes without
+// payments (Render free tier); this starts its background wake-up while the customer fills in the form, so the
+// payment is usually scored by the model instead of falling back to the rules. Answers at once and never waits
+// for the ML service; nothing happens when ML is off or the service answered in the last 10 minutes.
+router.post('/ml-warm-up', (req, res) => {
+  const client = getMlClient();
+  const warming = client ? client.wakeUpIfIdle() : false;
+  res.status(202).json({ success: true, data: { mlEnabled: Boolean(client), warming } });
+});
 
 // ── GET /customer-api/transactions ────────────────────────────────────────────
 router.get(
