@@ -57,7 +57,8 @@ describe('A-01 admin dashboard', () => {
     fireEvent.change(screen.getByLabelText('To (IST day)'), { target: { value: '2026-10-01' } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('“From” must be on or before “To”.');
-    expect(api.get).toHaveBeenCalledTimes(1); // nothing was fetched
+    // nothing was fetched (Phase 10: the scoring-engine card makes its own, separate GET /admin-api/ml-status)
+    expect(api.get.mock.calls.filter(([url]) => url === '/admin-api/analytics')).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText('To (IST day)'), { target: { value: '2026-10-07' } });
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));

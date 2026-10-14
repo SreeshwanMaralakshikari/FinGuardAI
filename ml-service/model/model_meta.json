@@ -1,0 +1,280 @@
+{
+  "modelVersion": "fg-xgb-1.1.0",
+  "trainedAt": "2026-10-14T03:24:17+00:00",
+  "algorithm": "XGBoost gradient-boosted trees (binary:logistic)",
+  "xgboostVersion": "3.4.1",
+  "pythonVersion": "3.13.16",
+  "bestIteration": 176,
+  "params": {
+    "objective": "binary:logistic",
+    "eval_metric": [
+      "aucpr",
+      "logloss"
+    ],
+    "tree_method": "hist",
+    "max_depth": 5,
+    "learning_rate": 0.05,
+    "min_child_weight": 5,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "monotone_constraints": "(0,1,1,1,1,1,1,1,1,0,-1,1,1,-1,0,0,0,0)",
+    "seed": 42
+  },
+  "modelColumns": [
+    "amount",
+    "amountToAvgRatio",
+    "amountToMaxRatio",
+    "txnsLastHour",
+    "txnsLastDay",
+    "isNewCity",
+    "isNewDevice",
+    "isNewPaymentMethod",
+    "isUnusualHour",
+    "hourOfDay",
+    "deviceReputationScore",
+    "deviceIsBlacklisted",
+    "isHighRiskMerchant",
+    "hasProfile",
+    "paymentMethod_UPI",
+    "paymentMethod_CARD",
+    "paymentMethod_NET_BANKING",
+    "paymentMethod_WALLET"
+  ],
+  "contract": [
+    {
+      "name": "amount",
+      "type": "float",
+      "min": 0.01,
+      "max": 100000000,
+      "description": "Payment amount in rupees."
+    },
+    {
+      "name": "amountToAvgRatio",
+      "type": "float",
+      "min": 0,
+      "max": 1000000,
+      "description": "amount / customer's rolling average amount (1.0 when no profile)."
+    },
+    {
+      "name": "amountToMaxRatio",
+      "type": "float",
+      "min": 0,
+      "max": 1000000,
+      "description": "amount / customer's largest previous amount (1.0 when no profile)."
+    },
+    {
+      "name": "txnsLastHour",
+      "type": "int",
+      "min": 0,
+      "max": 100000,
+      "description": "Customer's payments in the previous 60 minutes (current one excluded)."
+    },
+    {
+      "name": "txnsLastDay",
+      "type": "int",
+      "min": 0,
+      "max": 1000000,
+      "description": "Customer's payments in the previous 24 hours (current one excluded)."
+    },
+    {
+      "name": "isNewCity",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the city is not among the customer's usual cities."
+    },
+    {
+      "name": "isNewDevice",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the device is not among the customer's known devices."
+    },
+    {
+      "name": "isNewPaymentMethod",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the payment method is not among the customer's usual methods."
+    },
+    {
+      "name": "isUnusualHour",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the hour is not among the customer's usual hours."
+    },
+    {
+      "name": "hourOfDay",
+      "type": "int",
+      "min": 0,
+      "max": 23,
+      "description": "Local hour in India (Asia/Kolkata), 0-23."
+    },
+    {
+      "name": "deviceReputationScore",
+      "type": "float",
+      "min": 0,
+      "max": 100,
+      "description": "Device trust score 0-100 (100 when the device has no history)."
+    },
+    {
+      "name": "deviceIsBlacklisted",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the device is blacklisted."
+    },
+    {
+      "name": "isHighRiskMerchant",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the merchant category is in the admin's high-risk list."
+    },
+    {
+      "name": "hasProfile",
+      "type": "binary",
+      "min": 0,
+      "max": 1,
+      "description": "1 when the customer has a behaviour profile with at least one payment."
+    },
+    {
+      "name": "paymentMethod",
+      "type": "enum",
+      "values": [
+        "UPI",
+        "CARD",
+        "NET_BANKING",
+        "WALLET"
+      ],
+      "description": "Transaction payment method."
+    }
+  ],
+  "scoreMapping": "fraudScore = round(100 \u00d7 probability); riskLevel uses the admin thresholds in the backend",
+  "dataset": {
+    "source": "synthetic (training/generate_data.py) \u2014 not real bank data",
+    "file": "synthetic_transactions.csv",
+    "payments": 769782,
+    "customers": 8000,
+    "fraudRate": 0.00645,
+    "split": "70/15/15 by customer",
+    "testPayments": 113574
+  },
+  "testMetrics": {
+    "ml": {
+      "rocAuc": 0.9328,
+      "prAuc": 0.7682,
+      "atMedium": {
+        "cutoff": 25,
+        "tp": 516,
+        "fp": 116,
+        "fn": 197,
+        "tn": 112745,
+        "precision": 0.8165,
+        "recall": 0.7237,
+        "f1": 0.7673,
+        "falsePositiveRate": 0.00103,
+        "flaggedShare": 0.00556
+      },
+      "atHigh": {
+        "cutoff": 50,
+        "tp": 486,
+        "fp": 47,
+        "fn": 227,
+        "tn": 112814,
+        "precision": 0.9118,
+        "recall": 0.6816,
+        "f1": 0.7801,
+        "falsePositiveRate": 0.00042,
+        "flaggedShare": 0.00469
+      },
+      "atCritical": {
+        "cutoff": 75,
+        "tp": 455,
+        "fp": 27,
+        "fn": 258,
+        "tn": 112834,
+        "precision": 0.944,
+        "recall": 0.6381,
+        "f1": 0.7615,
+        "falsePositiveRate": 0.00024,
+        "flaggedShare": 0.00424
+      },
+      "brier": 0.002144,
+      "calibration": [
+        {
+          "range": "0.00-0.05",
+          "payments": 112593,
+          "meanPredicted": 0.0016,
+          "observedFraudRate": 0.0013
+        },
+        {
+          "range": "0.05-0.25",
+          "payments": 350,
+          "meanPredicted": 0.1005,
+          "observedFraudRate": 0.1343
+        },
+        {
+          "range": "0.25-0.50",
+          "payments": 100,
+          "meanPredicted": 0.3776,
+          "observedFraudRate": 0.32
+        },
+        {
+          "range": "0.50-0.75",
+          "payments": 51,
+          "meanPredicted": 0.6094,
+          "observedFraudRate": 0.5882
+        },
+        {
+          "range": "0.75-1.00",
+          "payments": 480,
+          "meanPredicted": 0.9726,
+          "observedFraudRate": 0.9458
+        }
+      ]
+    },
+    "ruleEngine": {
+      "rocAuc": 0.8429,
+      "prAuc": 0.3266,
+      "atMedium": {
+        "cutoff": 25,
+        "tp": 543,
+        "fp": 9375,
+        "fn": 170,
+        "tn": 103486,
+        "precision": 0.0547,
+        "recall": 0.7616,
+        "f1": 0.1022,
+        "falsePositiveRate": 0.08307,
+        "flaggedShare": 0.08733
+      },
+      "atHigh": {
+        "cutoff": 50,
+        "tp": 251,
+        "fp": 241,
+        "fn": 462,
+        "tn": 112620,
+        "precision": 0.5102,
+        "recall": 0.352,
+        "f1": 0.4166,
+        "falsePositiveRate": 0.00214,
+        "flaggedShare": 0.00433
+      },
+      "atCritical": {
+        "cutoff": 75,
+        "tp": 80,
+        "fp": 12,
+        "fn": 633,
+        "tn": 112849,
+        "precision": 0.8696,
+        "recall": 0.1122,
+        "f1": 0.1988,
+        "falsePositiveRate": 0.00011,
+        "flaggedShare": 0.00081
+      }
+    }
+  }
+}

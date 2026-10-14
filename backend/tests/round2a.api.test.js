@@ -81,14 +81,15 @@ describe('A-09 transactionService', () => {
     expect(await DeviceReputationModel.countDocuments({ deviceId: 'dev-x' })).toBe(1);
   });
 
-  it('the HTTP response keeps its shape (201, flat data) and gains only scoreBreakdown', async () => {
+  it('the HTTP response keeps its shape (201, flat data) and gains only scoreBreakdown (+ scoring, Phase 10)', async () => {
     const { agent } = await customer();
     const res = await post(agent, txn());
     expect(res.status).toBe(201);
     expect(Object.keys(res.body)).toEqual(['success', 'message', 'data']);
     expect(res.body.message).toBe('Transaction submitted successfully.');
     expect(Object.keys(res.body.data)).toEqual(['id', 'publicId', 'amount', 'merchantName', 'merchantCategory', 'paymentMethod', 'fraudScore',
-      'riskLevel', 'reasons', 'recommendedAction', 'estimatedLoss', 'status', 'fraudAlert', 'timestamp', 'scoreBreakdown']);
+      'riskLevel', 'reasons', 'recommendedAction', 'estimatedLoss', 'status', 'fraudAlert', 'timestamp', 'scoreBreakdown', 'scoring']);
+    expect(res.body.data.scoring).toEqual({ engine: 'RULES', ruleScore: res.body.data.fraudScore }); // ML off in tests
     expect(res.body.replayed).toBeUndefined();
   });
 });

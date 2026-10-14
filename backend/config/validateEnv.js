@@ -9,7 +9,8 @@
  *   (D-02), database name in MONGODB_URI (D-04), RENDER without
  *   NODE_ENV=production (D-05), placeholder JWT_SECRET (D-10),
  *   ANALYST_INVITE_CODE (L-11), PORT and the invite-code length in every mode (D-10),
- *   secure-by-default NODE_ENV (D-03: anything but development|test is production-like).
+ *   secure-by-default NODE_ENV (D-03: anything but development|test is production-like),
+ *   ML_ENABLED / ML_SERVICE_URL / ML_API_KEY / ML_TIMEOUT_MS / ML_COOLDOWN_MS (Phase 10).
  * @phase Phase 9 — Deployment
  */
 import { COOKIE_MODES } from './cookieOptions.js';
@@ -17,6 +18,7 @@ import { getMongoDbName } from './mongoUri.js';
 import { isValidTimeZone } from './timeZone.js';
 import { isProductionLike } from './environment.js';
 import { validateOpsSettings } from './opsSettings.js';
+import { validateMlSettings } from './mlSettings.js';
 
 const ALWAYS_REQUIRED = ['MONGODB_URI', 'JWT_SECRET'];
 
@@ -144,6 +146,9 @@ const validateEnv = () => {
 
   // C-04 / C-08: retention and device-cap settings.
   problems.push(...validateOpsSettings(process.env));
+
+  // Phase 10: ML scoring service (only checked when ML_ENABLED=true).
+  problems.push(...validateMlSettings(process.env));
 
   if (isProduction && process.env.FRONTEND_URL) {
     // Each entry must be a bare https origin — exactly what browsers send in

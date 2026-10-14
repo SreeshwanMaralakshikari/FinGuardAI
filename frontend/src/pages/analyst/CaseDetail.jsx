@@ -33,7 +33,7 @@ import LoadError from '../../components/common/LoadError.jsx';
 import Modal from '../../components/common/Modal.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
-import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
+import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, CaseStatusBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 
@@ -95,8 +95,8 @@ function CaseTransaction({ tx }) {
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
         <ScoreBar value={tx.fraudScore} riskLevel={tx.riskLevel} label="Fraud score" />
       </div>
-      {tx.scoreBreakdown?.length > 0 && (
-        <div className="mt-4"><ScoreBreakdown breakdown={tx.scoreBreakdown} fraudScore={tx.fraudScore} /></div>
+      {(tx.scoreBreakdown?.length > 0 || tx.scoring) && (
+        <div className="mt-4"><FraudExplanation scoring={tx.scoring} breakdown={tx.scoreBreakdown} fraudScore={tx.fraudScore} /></div>
       )}
     </section>
   );

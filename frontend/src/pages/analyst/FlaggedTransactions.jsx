@@ -34,7 +34,7 @@ import Modal from '../../components/common/Modal.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
-import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
+import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge, CaseStatusBadge, AlertStatusBadge } from '../../components/common/Badges.jsx';
 
 // F-11: "Export CSV" writes the rows of the page that is loaded right now.
@@ -104,7 +104,7 @@ function InvestigationDetail({ ctx, t, dev, note, onNote, creating, onOpenCase, 
         {t.reasons?.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">{t.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
       </div>
 
-      <ScoreBreakdown breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
+      <FraudExplanation scoring={t.scoring} breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 
       <div>
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Device</p>

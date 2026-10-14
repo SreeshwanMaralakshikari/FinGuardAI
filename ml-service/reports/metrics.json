@@ -1,0 +1,197 @@
+{
+  "ml": {
+    "rocAuc": 0.9328,
+    "prAuc": 0.7682,
+    "atMedium": {
+      "cutoff": 25,
+      "tp": 516,
+      "fp": 116,
+      "fn": 197,
+      "tn": 112745,
+      "precision": 0.8165,
+      "recall": 0.7237,
+      "f1": 0.7673,
+      "falsePositiveRate": 0.00103,
+      "flaggedShare": 0.00556
+    },
+    "atHigh": {
+      "cutoff": 50,
+      "tp": 486,
+      "fp": 47,
+      "fn": 227,
+      "tn": 112814,
+      "precision": 0.9118,
+      "recall": 0.6816,
+      "f1": 0.7801,
+      "falsePositiveRate": 0.00042,
+      "flaggedShare": 0.00469
+    },
+    "atCritical": {
+      "cutoff": 75,
+      "tp": 455,
+      "fp": 27,
+      "fn": 258,
+      "tn": 112834,
+      "precision": 0.944,
+      "recall": 0.6381,
+      "f1": 0.7615,
+      "falsePositiveRate": 0.00024,
+      "flaggedShare": 0.00424
+    },
+    "brier": 0.002144,
+    "calibration": [
+      {
+        "range": "0.00-0.05",
+        "payments": 112593,
+        "meanPredicted": 0.0016,
+        "observedFraudRate": 0.0013
+      },
+      {
+        "range": "0.05-0.25",
+        "payments": 350,
+        "meanPredicted": 0.1005,
+        "observedFraudRate": 0.1343
+      },
+      {
+        "range": "0.25-0.50",
+        "payments": 100,
+        "meanPredicted": 0.3776,
+        "observedFraudRate": 0.32
+      },
+      {
+        "range": "0.50-0.75",
+        "payments": 51,
+        "meanPredicted": 0.6094,
+        "observedFraudRate": 0.5882
+      },
+      {
+        "range": "0.75-1.00",
+        "payments": 480,
+        "meanPredicted": 0.9726,
+        "observedFraudRate": 0.9458
+      }
+    ]
+  },
+  "ruleEngine": {
+    "rocAuc": 0.8429,
+    "prAuc": 0.3266,
+    "atMedium": {
+      "cutoff": 25,
+      "tp": 543,
+      "fp": 9375,
+      "fn": 170,
+      "tn": 103486,
+      "precision": 0.0547,
+      "recall": 0.7616,
+      "f1": 0.1022,
+      "falsePositiveRate": 0.08307,
+      "flaggedShare": 0.08733
+    },
+    "atHigh": {
+      "cutoff": 50,
+      "tp": 251,
+      "fp": 241,
+      "fn": 462,
+      "tn": 112620,
+      "precision": 0.5102,
+      "recall": 0.352,
+      "f1": 0.4166,
+      "falsePositiveRate": 0.00214,
+      "flaggedShare": 0.00433
+    },
+    "atCritical": {
+      "cutoff": 75,
+      "tp": 80,
+      "fp": 12,
+      "fn": 633,
+      "tn": 112849,
+      "precision": 0.8696,
+      "recall": 0.1122,
+      "f1": 0.1988,
+      "falsePositiveRate": 0.00011,
+      "flaggedShare": 0.00081
+    }
+  },
+  "perScenarioCaughtAtHigh": {
+    "ml": {
+      "account_takeover": {
+        "payments": 131,
+        "caughtShare": 0.8855
+      },
+      "card_testing": {
+        "payments": 233,
+        "caughtShare": 0.9056
+      },
+      "low_and_slow": {
+        "payments": 30,
+        "caughtShare": 0.0
+      },
+      "mule_cashout": {
+        "payments": 53,
+        "caughtShare": 0.434
+      },
+      "new_account_fraud": {
+        "payments": 124,
+        "caughtShare": 0.7984
+      },
+      "sim_swap": {
+        "payments": 55,
+        "caughtShare": 0.8727
+      },
+      "social_engineering": {
+        "payments": 41,
+        "caughtShare": 0.0244
+      }
+    },
+    "ruleEngine": {
+      "account_takeover": {
+        "payments": 131,
+        "caughtShare": 0.5115
+      },
+      "card_testing": {
+        "payments": 233,
+        "caughtShare": 0.5408
+      },
+      "low_and_slow": {
+        "payments": 30,
+        "caughtShare": 0.0
+      },
+      "mule_cashout": {
+        "payments": 53,
+        "caughtShare": 0.7358
+      },
+      "new_account_fraud": {
+        "payments": 124,
+        "caughtShare": 0.0161
+      },
+      "sim_swap": {
+        "payments": 55,
+        "caughtShare": 0.4182
+      },
+      "social_engineering": {
+        "payments": 41,
+        "caughtShare": 0.0
+      }
+    }
+  },
+  "meanAbsShap": {
+    "amountToAvgRatio": 0.4393,
+    "isNewCity": 0.3515,
+    "deviceReputationScore": 0.3423,
+    "amount": 0.333,
+    "isNewDevice": 0.2705,
+    "txnsLastHour": 0.1898,
+    "paymentMethod_CARD": 0.1789,
+    "hourOfDay": 0.1654,
+    "isHighRiskMerchant": 0.1447,
+    "txnsLastDay": 0.1306,
+    "amountToMaxRatio": 0.1201,
+    "hasProfile": 0.1189,
+    "isUnusualHour": 0.0896,
+    "paymentMethod_WALLET": 0.0349,
+    "paymentMethod_UPI": 0.0297,
+    "paymentMethod_NET_BANKING": 0.0027,
+    "isNewPaymentMethod": 0.0009,
+    "deviceIsBlacklisted": 0.0
+  }
+}

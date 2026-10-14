@@ -26,7 +26,7 @@ import Modal from '../../components/common/Modal.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
-import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
+import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 const EMPTY_FILTERS = { riskLevel: '', paymentMethod: '', startDate: '', endDate: '' };
@@ -159,7 +159,7 @@ export default function TransactionHistory() {
               <ScoreBar value={t.fraudScore} riskLevel={t.riskLevel} label="Fraud score" />
             </div>
 
-            <ScoreBreakdown breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
+            <FraudExplanation scoring={t.scoring} breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Why this score</p>

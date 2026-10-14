@@ -32,7 +32,7 @@ import FormField from '../../components/common/FormField.jsx';
 import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
-import ScoreBreakdown from '../../components/common/ScoreBreakdown.jsx';
+import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 // Suggestions only — any category may be typed (N-18)
@@ -77,7 +77,7 @@ function TransactionResult({ result, onAnother }) {
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
           <ScoreBar value={result.fraudScore} riskLevel={result.riskLevel} label="Fraud score" />
         </div>
-        <ScoreBreakdown breakdown={result.scoreBreakdown} fraudScore={result.fraudScore} />
+        <FraudExplanation scoring={result.scoring} breakdown={result.scoreBreakdown} fraudScore={result.fraudScore} />
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Signals</p>
           {result.reasons?.length ? (

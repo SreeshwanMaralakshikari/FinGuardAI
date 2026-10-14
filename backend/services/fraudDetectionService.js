@@ -47,6 +47,12 @@
  *                                 // device, time, merchant); points 0 included, max = the rule cap
  *   rawScore:           number,   // B-01: sum of the six rule points BEFORE the clamp to 0–100
  * }}
+ *
+ * Also exported for the Phase 10 ML path (services/scoringService.js), so an ML score is
+ * turned into a decision exactly like a rule score:
+ *   resolveThresholds(thresholds)                      → effective admin settings (defaults per field)
+ *   decisionForScore(fraudScore, amount, bands)        → { riskLevel, recommendedAction, estimatedLoss }
+ *   findHighRiskMerchant(merchantCategory, configured) → matched high-risk entry or undefined
  */
 
 import { getHourInAppZone } from '../config/timeZone.js';
@@ -198,19 +204,31 @@ const timePatternCheck = (transaction, behaviorProfile) => {
   return { score: Math.min(score, 10), reasons, type: 'UNUSUAL_HOUR' };
 };
 
+// ─── High-risk merchant matching (shared with the Phase 10 ML feature builder) ──
+// L-15: both sides normalised (upper-case, spaces/punctuation except "_"
+// removed), so "casino", "CASI NO" and a stored "Casino" all match.
+// The comparison key also drops "_" so "crypto exchange" matches a configured
+// CRYPTO_EXCHANGE (the admin form turns spaces into "_").
+const categoryKey = (v) => normalizeCategory(v).replaceAll('_', '');
+
+/**
+ * The configured high-risk entry `merchantCategory` matches, or undefined.
+ * @param {string|undefined} merchantCategory
+ * @param {string[]} configured  effective highRiskMerchants list
+ * @returns {string|undefined}
+ */
+const findHighRiskMerchant = (merchantCategory, configured) => {
+  const category = categoryKey(merchantCategory);
+  return category ? configured.find((entry) => categoryKey(entry) === category) : undefined;
+};
+
 // ─── Rule evaluator 6 — Merchant Risk ────────────────────────────────────────
 const merchantRiskCheck = (transaction, thresholds) => {
   const reasons = [];
   let score = 0;
 
-  // L-15: both sides normalised (upper-case, spaces/punctuation except "_"
-  // removed), so "casino", "CASI NO" and a stored "Casino" all match.
-  // The comparison key also drops "_" so "crypto exchange" matches a configured
-  // CRYPTO_EXCHANGE (the admin form turns spaces into "_").
-  const categoryKey  = (v) => normalizeCategory(v).replaceAll('_', '');
-  const category     = categoryKey(transaction.merchantCategory);
-  const configured   = thresholds.highRiskMerchants ?? DEFAULT_THRESHOLDS.highRiskMerchants;
-  const matched      = category ? configured.find((entry) => categoryKey(entry) === category) : undefined;
+  const configured = thresholds.highRiskMerchants ?? DEFAULT_THRESHOLDS.highRiskMerchants;
+  const matched    = findHighRiskMerchant(transaction.merchantCategory, configured);
 
   if (matched !== undefined) {
     score += 35;
@@ -243,30 +261,12 @@ const toPlain = (value) =>
 /** A usable number, or undefined: null, NaN, Infinity and non-numbers all fall back to the default (B-06). */
 const num = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
 
-// ─── Score → band (shared with the B-07 what-if preview so both always agree) ──────────────────
 /**
- * LOW < mediumMin <= MEDIUM < highMin <= HIGH < criticalMin <= CRITICAL (lower bounds are inclusive).
- * @param {number} fraudScore
- * @param {{ mediumMin: number, highMin: number, criticalMin: number }} scoreThresholds
- * @returns {'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'}
+ * The thresholds the engine actually uses: SystemConfig values merged with the defaults PER FIELD.
+ * Shared by checkFraud and the Phase 10 ML path, so both read the admin settings identically.
+ * @param {object|null} thresholds  SystemConfig (lean or hydrated) or null on an unseeded DB
  */
-const riskLevelForScore = (fraudScore, { mediumMin, highMin, criticalMin }) => {
-  if (fraudScore >= criticalMin) return 'CRITICAL';
-  if (fraudScore >= highMin)     return 'HIGH';
-  if (fraudScore >= mediumMin)   return 'MEDIUM';
-  return 'LOW';
-};
-
-/** The built-in bands used when SystemConfig holds none (a copy, so callers cannot mutate the defaults). */
-const defaultScoreThresholds = () => ({ ...DEFAULT_THRESHOLDS.scoreThresholds });
-
-// ─── Main exported function ───────────────────────────────────────────────────
-const checkFraud = ({
-  transaction,
-  behaviorProfile   = null,
-  deviceReputation  = null,
-  thresholds        = null,   // null mirrors findOne() return for unseeded DBs (C-P5-02)
-}) => {
+const resolveThresholds = (thresholds) => {
   // Safely handle null thresholds — SystemConfigModel.findOne() returns null
   // when the DB is not yet seeded.  JS default parameters only fire for
   // undefined, not null, so we must guard here explicitly.  (C-P5-02)
@@ -275,7 +275,7 @@ const checkFraud = ({
   // Merge caller-supplied thresholds with defaults PER FIELD (B-06). `??` (not spread) so an
   // explicit null / NaN / non-number stored in SystemConfig falls back to the default instead of
   // overriding it (a stored maxPerHour: null used to flag every payment with "limit: null").
-  const effectiveThresholds = {
+  return {
     ...DEFAULT_THRESHOLDS,
     ...safeThresholds,
     amountThreshold:  num(safeThresholds.amountThreshold)  ?? DEFAULT_THRESHOLDS.amountThreshold,
@@ -293,6 +293,65 @@ const checkFraud = ({
       ? safeThresholds.highRiskMerchants
       : DEFAULT_THRESHOLDS.highRiskMerchants,
   };
+};
+
+// ─── Score → band (shared with the B-07 what-if preview so both always agree) ──────────────────
+/**
+ * LOW < mediumMin <= MEDIUM < highMin <= HIGH < criticalMin <= CRITICAL (lower bounds are inclusive).
+ * @param {number} fraudScore
+ * @param {{ mediumMin: number, highMin: number, criticalMin: number }} scoreThresholds
+ * @returns {'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'}
+ */
+const riskLevelForScore = (fraudScore, { mediumMin, highMin, criticalMin }) => {
+  if (fraudScore >= criticalMin) return 'CRITICAL';
+  if (fraudScore >= highMin)     return 'HIGH';
+  if (fraudScore >= mediumMin)   return 'MEDIUM';
+  return 'LOW';
+};
+
+/** The built-in bands used when SystemConfig holds none (a copy, so callers cannot mutate the defaults). */
+const defaultScoreThresholds = () => ({ ...DEFAULT_THRESHOLDS.scoreThresholds });
+
+// MEDIUM → 'OTP' is a label only: no OTP step exists, so CustomerAPI approves
+// the payment, raises an alert and keeps it OUT of the trusted baseline (L-01).
+const ACTION_MAP = Object.freeze({
+  LOW:      'APPROVE',
+  MEDIUM:   'OTP',
+  HIGH:     'HOLD',
+  CRITICAL: 'BLOCK',
+});
+
+const LOSS_MULTIPLIER = Object.freeze({
+  LOW:      0,
+  MEDIUM:   0.3,
+  HIGH:     0.7,
+  CRITICAL: 1.0,
+});
+
+/**
+ * Risk level, recommended action and estimated loss for a 0–100 score. Used by checkFraud and by the
+ * Phase 10 ML path, so a score means the same thing whichever engine produced it.
+ * @param {number} fraudScore
+ * @param {number} amount
+ * @param {{ mediumMin: number, highMin: number, criticalMin: number }} scoreThresholds  effective bands
+ */
+const decisionForScore = (fraudScore, amount, scoreThresholds) => {
+  const riskLevel = riskLevelForScore(fraudScore, scoreThresholds);
+  return {
+    riskLevel,
+    recommendedAction: ACTION_MAP[riskLevel],
+    estimatedLoss: Math.round((amount ?? 0) * LOSS_MULTIPLIER[riskLevel]),
+  };
+};
+
+// ─── Main exported function ───────────────────────────────────────────────────
+const checkFraud = ({
+  transaction,
+  behaviorProfile   = null,
+  deviceReputation  = null,
+  thresholds        = null,   // null mirrors findOne() return for unseeded DBs (C-P5-02)
+}) => {
+  const effectiveThresholds = resolveThresholds(thresholds);
 
   // Run all six evaluators
   const velocity = velocityCheck(transaction, behaviorProfile, effectiveThresholds);
@@ -330,33 +389,15 @@ const checkFraud = ({
     .filter((rule) => rule.reasons.length > 0)
     .map((rule) => rule.type);
 
-  // Derive risk level from systemConfig score thresholds
-  const riskLevel = riskLevelForScore(fraudScore, effectiveThresholds.scoreThresholds);
-
-  // MEDIUM → 'OTP' is a label only: no OTP step exists, so CustomerAPI approves
-  // the payment, raises an alert and keeps it OUT of the trusted baseline (L-01).
-  const ACTION_MAP = {
-    LOW:      'APPROVE',
-    MEDIUM:   'OTP',
-    HIGH:     'HOLD',
-    CRITICAL: 'BLOCK',
-  };
-
-  const LOSS_MULTIPLIER = {
-    LOW:      0,
-    MEDIUM:   0.3,
-    HIGH:     0.7,
-    CRITICAL: 1.0,
-  };
-
-  const txnAmount     = transaction.amount ?? 0;
-  const estimatedLoss = Math.round(txnAmount * LOSS_MULTIPLIER[riskLevel]);
+  // Derive risk level, action and estimated loss from the score (shared with the ML path)
+  const { riskLevel, recommendedAction, estimatedLoss } =
+    decisionForScore(fraudScore, transaction.amount, effectiveThresholds.scoreThresholds);
 
   return {
     fraudScore,
     riskLevel,
     reasons,
-    recommendedAction: ACTION_MAP[riskLevel],
+    recommendedAction,
     estimatedLoss,
     signals,
     breakdown,
@@ -364,4 +405,11 @@ const checkFraud = ({
   };
 };
 
-export { checkFraud, riskLevelForScore, defaultScoreThresholds };
+export {
+  checkFraud,
+  riskLevelForScore,
+  defaultScoreThresholds,
+  resolveThresholds,
+  decisionForScore,
+  findHighRiskMerchant,
+};

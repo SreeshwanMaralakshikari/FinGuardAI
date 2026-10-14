@@ -171,7 +171,7 @@ describe('H-01 buildPagination', () => {
 });
 
 describe('buildTransactionResponse', () => {
-  it('has exactly the documented keys (plus scoreBreakdown) and plain breakdown objects', () => {
+  it('has exactly the documented keys (plus scoreBreakdown and scoring) and plain breakdown objects', () => {
     const txn = {
       _id: 'a1', publicId: 'TXN-2026-00001', amount: 5, merchantName: 'M', merchantCategory: 'GENERAL', paymentMethod: 'UPI',
       fraudScore: 10, riskLevel: 'LOW', reasons: ['r'], recommendedAction: 'APPROVE', estimatedLoss: 0, status: 'APPROVED',
@@ -179,7 +179,8 @@ describe('buildTransactionResponse', () => {
     };
     const out = buildTransactionResponse(txn, { _id: 'al1' });
     expect(Object.keys(out)).toEqual(['id', 'publicId', 'amount', 'merchantName', 'merchantCategory', 'paymentMethod', 'fraudScore', 'riskLevel',
-      'reasons', 'recommendedAction', 'estimatedLoss', 'status', 'fraudAlert', 'timestamp', 'scoreBreakdown']);
+      'reasons', 'recommendedAction', 'estimatedLoss', 'status', 'fraudAlert', 'timestamp', 'scoreBreakdown', 'scoring']);
+    expect(out.scoring).toBeNull(); // Phase 10: no scoring block on a transaction scored before Phase 10
     expect(out.fraudAlert).toEqual({ id: 'al1' });
     expect(out.scoreBreakdown).toEqual([{ rule: 'amount', label: 'Amount anomaly', points: 10, max: 35 }]);
     expect(buildTransactionResponse({ ...txn, scoreBreakdown: undefined }, null)).toMatchObject({ fraudAlert: null, scoreBreakdown: [] });

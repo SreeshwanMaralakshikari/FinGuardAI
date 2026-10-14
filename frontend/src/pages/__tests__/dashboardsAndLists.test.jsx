@@ -30,15 +30,19 @@ describe('CustomerDashboard', () => {
 
 describe('AdminDashboard', () => {
   it('on a failed load shows the error with Retry and no zero KPIs', async () => {
-    api.get.mockRejectedValueOnce(fail(500, 'Analytics unavailable'));
+    // Phase 10: only the analytics request fails here (the scoring-engine card has its own GET)
+    const analyticsErrors = [fail(500, 'Analytics unavailable'), fail(500, 'Still down')];
+    api.get.mockImplementation(async (url) => {
+      if (url === '/admin-api/analytics') throw analyticsErrors.shift();
+      throw fail(404, 'not part of this test');
+    });
     renderApp(<AdminDashboard />, { auth: signedIn({ role: 'ADMIN' }) });
     expect(await screen.findByRole('alert')).toHaveTextContent('Analytics unavailable');
     expect(screen.queryByText('Fraud rate')).toBeNull();
     expect(screen.queryByText('Transactions')).toBeNull();
-    api.get.mockRejectedValueOnce(fail(500, 'Still down'));
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('Still down')).toBeInTheDocument();
-    expect(api.get).toHaveBeenCalledTimes(2);
+    expect(api.get.mock.calls.filter(([url]) => url === '/admin-api/analytics')).toHaveLength(2);
   });
 });
 

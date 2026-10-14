@@ -8,6 +8,7 @@
  *   A-01: top devices (real deviceId list) and the fraud-score histogram; a From / To filter (IST days)
  *   re-fetches with startDate/endDate. Open cases / open alerts are live counts and ignore the range.
  *   N-02: a failed analytics load shows the error + Retry instead of ₹0.00 / 0 % KPIs and empty charts.
+ *   Phase 10: MlStatusCard (GET /admin-api/ml-status) shows which engine scores payments.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -21,6 +22,7 @@ import Alert from '../../components/common/Alert.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import BarCard from '../../components/charts/BarCard.jsx';
 import { RiskBadge } from '../../components/common/Badges.jsx';
+import MlStatusCard from '../../components/common/MlStatusCard.jsx';
 
 const RISK_ORDER = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 const RISK_HEX = { LOW: '#059669', MEDIUM: '#ca8a04', HIGH: '#ea580c', CRITICAL: '#dc2626' };
@@ -107,6 +109,9 @@ export default function AdminDashboard() {
         </p>
         <div className="basis-full"><Alert tone="error">{rangeError}</Alert></div>
       </form>
+
+      {/* Phase 10: independent of the analytics request, so it also shows when analytics fail */}
+      <MlStatusCard />
 
       {a.error ? (
         <LoadError message={a.error} onRetry={load} />

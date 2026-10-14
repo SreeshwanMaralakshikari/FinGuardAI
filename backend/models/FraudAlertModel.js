@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ALERT_STATUSES, RISK_LEVELS } from '../utils/enums.js';
+import { ALERT_STATUSES, RISK_LEVELS, SCORING_ENGINES } from '../utils/enums.js';
 
 const { Schema } = mongoose;
 
@@ -48,6 +48,16 @@ const fraudAlertSchema = new Schema(
     reasons: {
       type: [String],
       default: [],            // mirrored from the parent transaction for alert context
+    },
+    // Phase 10: engine that produced the score (mirrored from Transaction.scoring; the SHAP values
+    // themselves live on the transaction, which exists for every payment, not only alerted ones).
+    scoringEngine: {
+      type: String,
+      enum: [...SCORING_ENGINES],
+    },
+    modelVersion: {
+      type: String,
+      maxlength: 64,
     },
     status: {
       type: String,

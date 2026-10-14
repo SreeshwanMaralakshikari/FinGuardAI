@@ -12,6 +12,8 @@ import { adminUsersQueryRules, auditLogsQueryRules } from '../validators/queryVa
 import { simulationLimiter } from '../middleware/rateLimiter.js';
 import { buildForecast } from '../utils/forecast.js';
 import { riskLevelForScore, defaultScoreThresholds } from '../services/fraudDetectionService.js';
+import { getMlClient } from '../services/scoringService.js';
+import { getMlSettings } from '../config/mlSettings.js';
 import {
   generateSimulation, clearSimulation, SimulationError, DEFAULT_SIM_COUNT,
 } from '../services/simulationService.js';
@@ -759,6 +761,39 @@ router.delete(
     );
 
     res.status(200).json({ success: true, message: 'Simulation data cleared.', data: deleted });
+  })
+);
+
+// ── GET /admin-api/ml-status ─────────────────────────────────────────────────
+// Phase 10: which engine scores payments right now, and how the last 24 hours were scored.
+// No secrets: the API key is never returned, only the service host.
+router.get(
+  '/ml-status',
+  asyncHandler(async (req, res) => {
+    const settings = getMlSettings();
+    const client = getMlClient();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const counts = await TransactionModel.aggregate([
+      { $match: { timestamp: { $gte: since } } },
+      { $group: { _id: '$scoring.engine', count: { $sum: 1 } } },
+    ]);
+    // A missing scoring.engine groups as null: transactions scored before Phase 10.
+    const last24h = { ML: 0, RULES: 0, LEGACY: 0 };
+    for (const { _id, count } of counts) last24h[_id ?? 'LEGACY'] += count;
+
+    // The client reports its own settings; with ML off, the configured timeout / cool-down are shown.
+    const state = client ? client.status() : {
+      serviceHost: null,
+      timeoutMs: settings.timeoutMs,
+      cooldownMs: settings.cooldownMs,
+      coolingDown: false,
+      cooldownEndsAt: null,
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      lastFailureCode: null,
+      modelVersion: null,
+    };
+    res.status(200).json({ success: true, data: { enabled: Boolean(client), ...state, last24h } });
   })
 );
 

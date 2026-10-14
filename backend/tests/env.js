@@ -8,3 +8,6 @@ process.env.TRUST_PROXY = '1';
 process.env.JWT_SECRET ||= 'test_jwt_secret_at_least_32_characters_long';
 process.env.FRONTEND_URL ||= 'http://localhost:3000';
 process.env.ANALYST_INVITE_CODE = 'test-invite-code'; // L-11: ANALYST registration needs this code
+// Phase 10: the suite never calls a real ML service. Tests that cover the ML path inject their own client
+// (services/scoringService.setMlClientForTests) pointed at tests/helpers/fakeMlService.js.
+process.env.ML_ENABLED = 'false';

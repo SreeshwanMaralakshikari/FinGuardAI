@@ -13,6 +13,7 @@ import UserModel from '../models/UserModel.js';
 import { seedConfig } from './helpers/seedConfig.js';
 import { loginAgent } from './helpers/authAgent.js';
 import { createWithSequentialId } from '../utils/generateSequentialId.js';
+import { OUTCOME_TITLES } from '../utils/caseWorkflow.js';
 
 beforeAll(connectTestDB);
 afterAll(disconnectTestDB);
@@ -436,7 +437,11 @@ describe('L-04 races', () => {
     expect((await FraudCaseModel.findById(caseId)).status).toBe(winner);
     expect((await FraudAlertModel.findById(alertId)).status).toBe(winner === 'RESOLVED' ? 'REVIEWED' : 'DISMISSED');
     expect((await TransactionModel.findById(transaction._id)).status).toBe(winner === 'RESOLVED' ? 'BLOCKED' : 'APPROVED');
-    expect(await NotificationModel.countDocuments({ recipientId: transaction.userId, title: /Cleared|Completed/ })).toBe(1);
+    // Exactly ONE outcome notice, and it is the winner's. (The old /Cleared|Completed/ pattern predates B-02's
+    // "Fraud Confirmed" title, so this test failed whenever RESOLVED happened to win the race.)
+    const outcomeNotices = { recipientId: transaction.userId, title: { $in: Object.values(OUTCOME_TITLES) } };
+    expect(await NotificationModel.countDocuments(outcomeNotices)).toBe(1);
+    expect(await NotificationModel.countDocuments({ ...outcomeNotices, title: OUTCOME_TITLES[winner] })).toBe(1);
   });
 
   it('the unique index catches a duplicate that slips past the pre-check → the same 400, no second case', async () => {

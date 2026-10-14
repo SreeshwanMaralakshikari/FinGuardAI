@@ -16,6 +16,22 @@ export const TRANSACTION_STATUSES = Object.freeze(['APPROVED', 'HELD', 'BLOCKED'
 /** F-02: ACKNOWLEDGED = the customer confirmed a MEDIUM alert themselves. It is never "open" (not counted as needing action). */
 export const ALERT_STATUSES = Object.freeze(['OPEN', 'REVIEWED', 'DISMISSED', 'ACKNOWLEDGED']);
 export const CASE_STATUSES = Object.freeze(['OPEN', 'ASSIGNED', 'UNDER_REVIEW', 'RESOLVED', 'DISMISSED']);
+/** Phase 10: which engine scored a payment. */
+export const SCORING_ENGINES = Object.freeze(['RULES', 'ML']);
+/** Phase 10: the 15 inputs of the ML service, in contract order (ml-service/app/features.py). */
+export const ML_FEATURE_KEYS = Object.freeze([
+  'amount', 'amountToAvgRatio', 'amountToMaxRatio', 'txnsLastHour', 'txnsLastDay',
+  'isNewCity', 'isNewDevice', 'isNewPaymentMethod', 'isUnusualHour', 'hourOfDay',
+  'deviceReputationScore', 'deviceIsBlacklisted', 'isHighRiskMerchant', 'hasProfile', 'paymentMethod',
+]);
+/** Phase 10: why the rules scored a payment although ML was enabled (services/mlClient.js). */
+export const ML_FALLBACK_REASONS = Object.freeze([
+  'TIMEOUT', 'UNAVAILABLE', 'AUTH', 'CONTRACT', 'INVALID_RESPONSE', 'COOLDOWN', 'ERROR',
+]);
+/** Phase 10: alert types an ML reason can map to (FraudAlert.alertType without COMPOSITE). */
+export const ML_SIGNAL_TYPES = Object.freeze([
+  'AMOUNT_ANOMALY', 'VELOCITY_BREACH', 'LOCATION_DEVIATION', 'NEW_DEVICE', 'UNUSUAL_HOUR', 'HIGH_RISK_MERCHANT',
+]);
 /**
  * Every action createAuditLog may write (A-09). The AuditLog schema validates against this list, so a new
  * action MUST be added here (a test scans the source for createAuditLog calls and fails on a missing one).

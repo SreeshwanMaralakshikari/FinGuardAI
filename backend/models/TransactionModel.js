@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
-import { PAYMENT_METHODS, RISK_LEVELS, TRANSACTION_STATUSES } from '../utils/enums.js';
+import {
+  PAYMENT_METHODS, RISK_LEVELS, TRANSACTION_STATUSES,
+  SCORING_ENGINES, ML_FEATURE_KEYS, ML_FALLBACK_REASONS, ML_SIGNAL_TYPES,
+} from '../utils/enums.js';
 
 const { Schema } = mongoose;
 
@@ -18,6 +21,32 @@ const scoreBreakdownSchema = new Schema(
     label:  { type: String, required: true },
     points: { type: Number, required: true, min: 0 },
     max:    { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
+// Phase 10: one SHAP value per ML feature (see services/scoringService.js)
+const shapValueSchema = new Schema(
+  {
+    feature: { type: String, enum: [...ML_FEATURE_KEYS], required: true },
+    label:   { type: String, required: true, maxlength: 80 },
+    value:   { type: String, required: true, maxlength: 40 },   // readable value, e.g. "10.0×" or "Yes"
+    shap:    { type: Number, required: true },                  // log-odds push: > 0 raises the risk
+  },
+  { _id: false }
+);
+
+// Phase 10: which engine produced the score, and the ML explanation when the model scored it.
+const scoringSchema = new Schema(
+  {
+    engine:           { type: String, enum: [...SCORING_ENGINES], required: true },
+    ruleScore:        { type: Number, min: 0, max: 100, required: true },  // the rule engine's score, for comparison
+    modelVersion:     { type: String, maxlength: 64 },
+    fraudProbability: { type: Number, min: 0, max: 1 },
+    fallbackReason:   { type: String, enum: [...ML_FALLBACK_REASONS] },     // only when ML was enabled but not used
+    signals:          { type: [{ type: String, enum: [...ML_SIGNAL_TYPES] }], default: undefined },
+    shapBaseValue:    { type: Number },
+    shapValues:       { type: [shapValueSchema], default: undefined },
   },
   { _id: false }
 );
@@ -111,6 +140,10 @@ const transactionSchema = new Schema(
     scoreBreakdown: {
       type: [scoreBreakdownSchema],
       default: [],
+    },
+    // Phase 10: absent on transactions scored before Phase 10 (the UI then shows the rule breakdown only).
+    scoring: {
+      type: scoringSchema,
     },
     status: {
       type: String,

@@ -1,0 +1,8 @@
+# Serving only — what Render installs. Versions are the ones the tests ran with.
+# xgboost-cpu is the CPU-only build (~6 MB). The plain "xgboost" package pulls
+# in NVIDIA's GPU library, which is far too large for a free instance.
+Flask==3.1.3
+gunicorn==26.2.0
+xgboost-cpu==3.4.1
+numpy==2.5.3
+scipy==1.18.1

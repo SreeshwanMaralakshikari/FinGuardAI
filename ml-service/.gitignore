@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+# Generated training data (~56 MB). Recreate it with:
+#   python -m training.generate_data --customers 8000 --days 120 --seed 42
+data/*.csv
+# model/ and reports/ ARE committed: Render's disk is wiped on every restart,
+# so the trained model must ship with the code.

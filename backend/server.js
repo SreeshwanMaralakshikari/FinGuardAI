@@ -16,6 +16,7 @@
  *   9. After connecting, every model's indexes are awaited and failures logged
  *      (E-17, config/db.js ensureIndexes) — the server still starts. On an existing database
  *      run `npm run db:sync-indexes` once after an upgrade (OPS: new unique / TTL indexes, dropped indexes)
+ *  10. Phase 10: the scoring engine is logged and a sleeping ML service is woken in the background
  * @phase Phase 2 spec → Phase 9 (production implementation)
  */
 import './config/loadEnv.js'; // ⚠️ keep first — see config/loadEnv.js
@@ -31,6 +32,8 @@ import app from './app.js';
 import { setIO, userRoom, roleRoom } from './utils/socketManager.js';
 import { socketAuthMiddleware } from './utils/socketAuth.js';
 import { registerProcessErrorHandlers } from './utils/processHandlers.js';
+import { getMlSettings } from './config/mlSettings.js';
+import { getMlClient } from './services/scoringService.js';
 
 const PORT = Number(process.env.PORT) || 5000;
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -143,6 +146,24 @@ const start = async () => {
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`[Server] FinGuardAI API listening on port ${PORT} (${describeEnvironment()})`);
+    logScoringEngine();
+  });
+};
+
+/** Phase 10: say which engine scores payments, and wake a sleeping ML service early (never blocks start-up). */
+const logScoringEngine = () => {
+  const settings = getMlSettings();
+  const client = getMlClient();
+  if (!client) {
+    console.log('[Server] Fraud scoring: rule engine (ML_ENABLED is not true)');
+    return;
+  }
+  console.log(`[Server] Fraud scoring: ML model at ${settings.url} (timeout ${settings.timeoutMs} ms), rule engine as fallback`);
+  client.wakeUp().then((ok) => {
+    const version = client.status().modelVersion;
+    console.log(ok
+      ? `[Server] ML service is up (model ${version ?? 'unknown'})`
+      : '[Server] WARNING: ML service did not answer /health — payments use the rule engine until it does');
   });
 };
 

@@ -8,7 +8,8 @@
  *   Steps (all inside the per-user lock, L-08 / N-28):
  *     0. C-01 idempotency replay   — same user + Idempotency-Key → the ORIGINAL result, nothing written
  *     1. load live thresholds, behaviour profile, device reputation, live velocity counts
- *     2. checkFraud (pure) → status
+ *     2. scoreTransaction → status (Phase 10: ML model when enabled and answering, otherwise the
+ *        rule engine checkFraud — services/scoringService.js)
  *     3. insert the transaction with its TXN public id in one write (AUD-05)
  *     4. MEDIUM+ → FraudAlert (C-02 idempotent retry), audit, customer notification, socket event
  *     5. behaviour profile (APPROVED + LOW only), device reputation, trust score — best effort
@@ -16,7 +17,7 @@
  *   Everything after step 3 is best-effort: the payment is saved, so a failing helper must never
  *   turn the request into a 500 (the customer would retry and pay twice, BE-5).
  */
-import { checkFraud } from './fraudDetectionService.js';
+import { scoreTransaction } from './scoringService.js';
 import { createWithSequentialId } from '../utils/generateSequentialId.js';
 import calcBehaviorProfile from '../utils/calcBehaviorProfile.js';
 import updateDeviceReputation from '../utils/updateDeviceReputation.js';
@@ -76,6 +77,11 @@ const createAlertOnce = async (alertDoc) => {
 /** One alert type per alert: the rule that fired, COMPOSITE when several different rules did. */
 const alertTypeFromSignals = (signals) => (signals.length === 1 ? signals[0] : 'COMPOSITE');
 
+/** Phase 10: the engine fields mirrored onto a FraudAlert (nothing for transactions without `scoring`). */
+const alertScoringFields = (scoring) => (scoring?.engine
+  ? { scoringEngine: scoring.engine, ...(scoring.modelVersion ? { modelVersion: scoring.modelVersion } : {}) }
+  : {});
+
 // recommendedAction → transaction status.
 //   OTP is only a label: there is NO OTP step. MEDIUM is approved with an alert
 //   (notification to the customer) but is NOT learned as normal behaviour (L-01).
@@ -84,6 +90,23 @@ const ACTION_TO_STATUS = { APPROVE: 'APPROVED', OTP: 'APPROVED', HOLD: 'HELD', B
 /** Plain {rule,label,points,max} objects (no Mongoose subdocuments) for API output. */
 const plainBreakdown = (breakdown) =>
   (breakdown ?? []).map(({ rule, label, points, max }) => ({ rule, label, points, max }));
+
+/**
+ * Phase 10: plain copy of Transaction.scoring for API output (null on transactions scored before Phase 10).
+ * Only the known fields are copied, so a Mongoose subdocument never leaks its internals.
+ */
+export const plainScoring = (scoring) => {
+  if (!scoring?.engine) return null;
+  const out = { engine: scoring.engine, ruleScore: scoring.ruleScore };
+  if (scoring.modelVersion !== undefined) out.modelVersion = scoring.modelVersion;
+  if (scoring.fraudProbability !== undefined) out.fraudProbability = scoring.fraudProbability;
+  if (scoring.fallbackReason !== undefined) out.fallbackReason = scoring.fallbackReason;
+  if (scoring.shapBaseValue !== undefined) out.shapBaseValue = scoring.shapBaseValue;
+  if (scoring.shapValues?.length) {
+    out.shapValues = scoring.shapValues.map(({ feature, label, value, shap }) => ({ feature, label, value, shap }));
+  }
+  return out;
+};
 
 /**
  * The `data` object of POST /customer-api/transactions, built from the STORED transaction (so a
@@ -107,6 +130,7 @@ export const buildTransactionResponse = (txn, alert) => ({
   fraudAlert: alert ? { id: alert._id } : null,
   timestamp: txn.timestamp,
   scoreBreakdown: plainBreakdown(txn.scoreBreakdown), // B-01
+  scoring: plainScoring(txn.scoring),                 // Phase 10
 });
 
 /** C-01: the transaction this user already stored under `idempotencyKey`, with its alert. */
@@ -122,7 +146,10 @@ const findReplay = async (userId, idempotencyKey) => {
   // R-05: the original attempt saved the payment but its alert insert failed (best effort, BE-5). The customer's retry
   // is the second chance: without an alert a HIGH / CRITICAL payment could never be reviewed. Same idempotent insert.
   if (!alert && ALERT_RISK_LEVELS.includes(transaction.riskLevel)) {
-    const fired = (transaction.scoreBreakdown ?? []).filter((r) => r.points > 0).map((r) => RULE_ALERT_TYPES[r.rule]);
+    // Phase 10: an ML-scored payment is classified by the features behind its reasons, like the first attempt.
+    const fired = transaction.scoring?.engine === 'ML'
+      ? [...(transaction.scoring.signals ?? [])]
+      : (transaction.scoreBreakdown ?? []).filter((r) => r.points > 0).map((r) => RULE_ALERT_TYPES[r.rule]);
     alert = await bestEffort('fraud alert creation (replay)', () => createAlertOnce({
       transactionId: transaction._id,
       userId,
@@ -131,6 +158,7 @@ const findReplay = async (userId, idempotencyKey) => {
       fraudScore: transaction.fraudScore,
       reasons: [...(transaction.reasons ?? [])],
       status: 'OPEN',
+      ...alertScoringFields(transaction.scoring),
     }));
   }
   return {
@@ -145,6 +173,7 @@ const findReplay = async (userId, idempotencyKey) => {
       estimatedLoss: transaction.estimatedLoss,
       breakdown: plainBreakdown(transaction.scoreBreakdown),
       rawScore: transaction.scoreBreakdown.reduce((sum, r) => sum + r.points, 0),
+      scoring: plainScoring(transaction.scoring),
     },
   };
 };
@@ -220,14 +249,15 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
       timestamp: new Date(),
     };
 
-    // 4. Run fraud detection — pure function, no DB side-effects (D-P4-05)
-    const fraud = checkFraud({
+    // 4. Run fraud detection — no DB side-effects (D-P4-05). Phase 10: the ML model scores the payment
+    //    when it is enabled and answers within ML_TIMEOUT_MS; otherwise the pure rule engine does.
+    const fraud = await scoreTransaction({
       transaction: transactionInput,
       behaviorProfile: profileForCheck,
       deviceReputation,
       thresholds,
     });
-    const { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals, breakdown } = fraud;
+    const { fraudScore, riskLevel, reasons, recommendedAction, estimatedLoss, signals, breakdown, scoring } = fraud;
 
     // 5. Map recommendedAction → transaction status
     const status = ACTION_TO_STATUS[recommendedAction] ?? 'HELD';
@@ -249,6 +279,7 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
         riskLevel,
         reasons,
         scoreBreakdown: breakdown,
+        scoring,                    // Phase 10
         recommendedAction,
         estimatedLoss,
         status,
@@ -288,6 +319,7 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
         fraudScore,
         reasons,
         status: 'OPEN',
+        ...alertScoringFields(scoring),
       };
       fraudAlert = await bestEffort('fraud alert creation', () => createAlertOnce(alertDoc))
         ?? await bestEffort('fraud alert creation (retry)', () => createAlertOnce(alertDoc)); // C-02: idempotent
@@ -358,7 +390,7 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
       'TRANSACTION_SUBMITTED',
       'Transaction',
       publicId,
-      { amount, merchantName, paymentMethod, riskLevel, fraudScore, status },
+      { amount, merchantName, paymentMethod, riskLevel, fraudScore, status, scoringEngine: scoring.engine },
       ip
     );
 
