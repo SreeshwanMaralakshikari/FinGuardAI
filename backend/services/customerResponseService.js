@@ -77,7 +77,7 @@ export const recordCustomerResponse = async ({ user, transactionId, answer, note
   const updated = await TransactionModel.findOneAndUpdate(
     { _id: transaction._id, userId: user._id, status: { $in: [...RESPONSE_STATUSES] }, 'customerResponse.answer': { $exists: false } },
     { $set: { customerResponse: { answer, note: note.trim(), respondedAt: new Date() } } },
-    { new: true, runValidators: true },
+    { returnDocument: 'after', runValidators: true }, // `new: true` is deprecated in Mongoose 9
   );
   if (!updated) throw new CustomerResponseError(409, 'You have already answered for this payment.');
 
