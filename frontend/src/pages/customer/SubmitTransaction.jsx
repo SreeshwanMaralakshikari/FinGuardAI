@@ -18,6 +18,8 @@
  *   the Thresholds page, so the field is free text with a suggestion list (datalist) instead of
  *   a closed <select>. City is trimmed and sent as typed (the backend normalises its case).
  *   D-2: opening the page asks the backend to wake the sleeping ML service (fire-and-forget, api/mlWarmUp.js).
+ *   R4-03: example scenarios fill the form (ScenarioPresets). R4-04: the result shows how the payment was scored
+ *   (ScoringPipeline: rule engine → ML model → decision).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -35,6 +37,9 @@ import Alert from '../../components/common/Alert.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
 import FraudExplanation from '../../components/common/FraudExplanation.jsx';
+import ScoringPipeline from '../../components/common/ScoringPipeline.jsx';
+import ScenarioPresets from '../../components/common/ScenarioPresets.jsx';
+import WasThisYou from '../../components/common/WasThisYou.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 // Suggestions only — any category may be typed (N-18)
@@ -75,6 +80,8 @@ function TransactionResult({ result, onAnother }) {
           <DetailRow label="Estimated loss at risk">{formatCurrency(result.estimatedLoss)}</DetailRow>
           <DetailRow label="Time">{formatDate(result.timestamp)}</DetailRow>
         </dl>
+        <WasThisYou transaction={result} />
+        <ScoringPipeline result={result} />
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
           <ScoreBar value={result.fraudScore} riskLevel={result.riskLevel} label="Fraud score" />
@@ -109,7 +116,7 @@ export default function SubmitTransaction() {
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey); // C-01: one key per payment attempt
   useEffect(() => { warmUpMl(); }, []); // D-2: start the ML service while the form is being filled in
   const {
-    register, handleSubmit, reset, formState: { errors, isSubmitting },
+    register, handleSubmit, reset, getValues, formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
       amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI',
@@ -143,11 +150,18 @@ export default function SubmitTransaction() {
     reset({ amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI', deviceId, city: '', country: '' });
   };
 
+  // R4-03: fill the form with an example; the customer still submits it themselves
+  const applyScenario = (scenario) => {
+    const current = getValues();
+    reset({ ...current, ...scenario.values({ deviceId, city: current.city?.trim() }) });
+  };
+
   if (result) return <TransactionResult result={result} onAnother={another} />;
 
   return (
     <div className="max-w-3xl">
       <PageHeader title="Submit a transaction" subtitle="Your payment is scored for fraud risk the moment you submit it." />
+      <div className="mb-4"><ScenarioPresets onPick={applyScenario} /></div>
       <form onSubmit={handleSubmit(onSubmit)} noValidate className={`${CARD.base} ${CARD.body} space-y-5`}>
         <Alert tone="error">{serverError}</Alert>
 

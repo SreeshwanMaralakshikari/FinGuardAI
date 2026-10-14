@@ -101,6 +101,7 @@ export const plainScoring = (scoring) => {
   const out = { engine: scoring.engine, ruleScore: scoring.ruleScore };
   if (scoring.mlScore !== undefined) out.mlScore = scoring.mlScore;
   if (scoring.ruleFloor) out.ruleFloor = true;
+  if (scoring.mlLatencyMs !== undefined) out.mlLatencyMs = scoring.mlLatencyMs;
   if (scoring.modelVersion !== undefined) out.modelVersion = scoring.modelVersion;
   if (scoring.fraudProbability !== undefined) out.fraudProbability = scoring.fraudProbability;
   if (scoring.fallbackReason !== undefined) out.fallbackReason = scoring.fallbackReason;

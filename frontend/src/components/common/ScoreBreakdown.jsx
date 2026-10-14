@@ -11,12 +11,12 @@
 import { normaliseBreakdown } from '../../utils/scoreBreakdown.js';
 
 const SEGMENT = [
-  'bg-sky-700 text-white',
-  'bg-amber-700 text-white',
-  'bg-emerald-700 text-white',
-  'bg-fuchsia-700 text-white',
-  'bg-orange-700 text-white',
-  'bg-slate-700 text-white',
+  'bg-sky-700 text-on-accent',
+  'bg-amber-700 text-on-accent',
+  'bg-emerald-700 text-on-accent',
+  'bg-fuchsia-700 text-on-accent',
+  'bg-orange-700 text-on-accent',
+  'bg-slate-700 text-on-accent',
 ];
 
 /**

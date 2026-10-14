@@ -3,6 +3,29 @@
 Newest round first. Rounds 2 and 3 (the two audits of the Phase 1–9 code) are documented in `docs/audit/`
 and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTEGRATION.md`.
 
+## Round 4: Guardian look and demo flow (14 Oct 2026)
+
+| ID | Change |
+|---|---|
+| R4-01 | **Two themes.** A light theme and a dark "night watch" theme, chosen before the first paint (`public/theme-init.js`), with a toggle in the navbar and on the public pages; it follows the device setting until the user picks one. All colours are CSS variables (`src/index.css`), so component class names did not change. Fonts are self-hosted: Rajdhani (headings, numbers) and IBM Plex Sans. Charts read their colours from the theme (`useChartColors`). New shield emblem and favicon. |
+| R4-02 | **Public landing page** at `/`, rendered outside the server wake gate so it appears at once. It wakes the API in the background and shows the server status, and it replays three real scoring results (`components/landing`). |
+| R4-03 | **Example payments** on *Submit transaction*: everyday payment, account takeover, high-risk merchant, very large payment. They fill the form only; the customer still submits. |
+| R4-04 | **Scoring pipeline** on the result: rule engine → ML model (score, version, time) → decision, including why the rules decided and whether the policy floor applied. The backend stores `scoring.mlLatencyMs`. |
+| R4-10b | **"Was this you?"**: on a held or blocked payment the customer confirms or disputes it, with an optional note (`POST /customer-api/transactions/:id/response`). Evidence only: the status never changes. It is stored once, audited (`CUSTOMER_RESPONDED`), and the assigned analyst (or every active analyst) gets a `CUSTOMER_RESPONSE` notification. Analysts see the answer on the flagged-payment and case pages. |
+| R4-05 | Optional **one-click demo sign-in** (customer and analyst only, never admin), off unless `VITE_DEMO_LOGINS=true`. |
+| R4-06 | **Link previews** (Open Graph and Twitter tags, `og-image.png`; the absolute URL comes from Vercel automatically). |
+| R4-07 | **Root README** with live links, screenshots, how scoring works, results, local setup, tests, deployment and troubleshooting. |
+
+Checks:
+- Backend: lint; 572 tests (the same 40 emulator-only failures on the stand-in database; 572/572 expected on Atlas).
+- Frontend: lint; 598/598 with the coverage gates; production build.
+- ML service: 106/106.
+- axe-core WCAG 2 A/AA scan of 10 pages in both themes: no violations.
+- No horizontal scrolling at 375 px.
+- Browser end-to-end run: landing → register → example payment → held → dispute → the analyst sees the answer and is notified.
+
+---
+
 ## Error-check round after Phase 10 (14 Oct 2026)
 
 Source: *FinGuardAI Error Check Report (Phase 1–10 zip)*. No High-severity errors were found; all items below are fixed.

@@ -1,5 +1,5 @@
-import { body, header } from 'express-validator';
-import { PAYMENT_METHODS } from '../utils/enums.js';
+import { body, header, param } from 'express-validator';
+import { PAYMENT_METHODS, CUSTOMER_RESPONSES } from '../utils/enums.js';
 
 /** C-01: format of the optional Idempotency-Key request header. */
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,100}$/;
@@ -73,4 +73,17 @@ export const submitTransactionRules = [
     .optional()
     .matches(IDEMPOTENCY_KEY_PATTERN)
     .withMessage('Idempotency-Key must be 8 to 100 characters: letters, digits, "_" or "-"'),
+];
+
+/** R4: POST /customer-api/transactions/:id/response ("Was this you?"). */
+export const customerResponseRules = [
+  param('id').isMongoId().withMessage('A valid transaction id is required'),
+  body('answer')
+    .isString().withMessage('Answer must be CONFIRMED or DISPUTED').bail()
+    .isIn(CUSTOMER_RESPONSES).withMessage('Answer must be CONFIRMED or DISPUTED'),
+  body('note')
+    .optional()
+    .isString().withMessage('Note must be text').bail()
+    .trim()
+    .isLength({ max: 300 }).withMessage('Note cannot exceed 300 characters'),
 ];

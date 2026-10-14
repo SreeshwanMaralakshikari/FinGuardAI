@@ -6,6 +6,7 @@
  *   - [P9] <ServerWakeGate> delays <App /> (and its checkAuthThunk) until the
  *     backend answers /health — handles Render cold starts
  *   - Toaster stays outside the gate so toasts work on every screen
+ *   - R4-02: "/" (the public landing page) is NOT behind the gate (Root)
  *   - [P9] 'vite:preloadError' handler reloads once after a redeploy
  * @phase Phase 6 (original) → Phase 9 (ServerWakeGate) [P9]
  * @decision D-P6-08
@@ -18,8 +19,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
 import { store } from './store/index.js';
-import App from './App.jsx';
-import ServerWakeGate from './components/common/ServerWakeGate.jsx'; // [P9]
+import Root from './Root.jsx'; // R4-02: landing page outside the wake gate
 
 import './index.css';
 
@@ -47,9 +47,7 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Provider store={store}>
       <BrowserRouter>
-        <ServerWakeGate>
-          <App />
-        </ServerWakeGate>
+        <Root />
         <Toaster
           position="bottom-right"
           toastOptions={{

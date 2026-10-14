@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 
 import { getNotificationTtlSeconds } from '../config/opsSettings.js';
+import { NOTIFICATION_TYPES } from '../utils/enums.js';
 
 const { Schema } = mongoose;
 
@@ -23,8 +24,8 @@ const notificationSchema = new Schema(
     type: {
       type: String,
       enum: {
-        values: ['FRAUD_ALERT', 'CASE_ASSIGNED', 'CASE_STATUS_CHANGED'],
-        message: 'Notification type must be FRAUD_ALERT, CASE_ASSIGNED, or CASE_STATUS_CHANGED',
+        values: [...NOTIFICATION_TYPES],
+        message: 'Notification type must be FRAUD_ALERT, CASE_ASSIGNED, CASE_STATUS_CHANGED or CUSTOMER_RESPONSE',
       },
       required: [true, 'Notification type is required'],
     },

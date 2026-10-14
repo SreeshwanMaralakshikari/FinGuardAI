@@ -10,16 +10,16 @@ import { NavLink } from 'react-router-dom';
 import { useDialog } from '../../hooks/useDialog.js';
 import Icon from '../common/Icon.jsx';
 
-const LINK_ACTIVE   = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium bg-primary-600 text-white';
-const LINK_INACTIVE = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white';
+const LINK_ACTIVE   = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium bg-primary-600 text-on-accent';
+const LINK_INACTIVE = 'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-chrome-muted hover:bg-chrome-hover hover:text-chrome-ink';
 
 function Brand() {
   return (
     <div className="flex h-16 items-center gap-2 px-5">
-      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-white">
+      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600 text-on-accent">
         <Icon name="shield" className="h-5 w-5" />
       </span>
-      <span className="text-lg font-bold text-white">FinGuard<span className="text-primary-400">AI</span></span>
+      <span className="text-lg font-bold text-chrome-ink">FinGuard<span className="text-primary-400">AI</span></span>
     </div>
   );
 }
@@ -50,18 +50,18 @@ function MobileDrawer({ navItems, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
-      <div className="absolute inset-0 bg-gray-900/60" onClick={onClose} aria-hidden="true" />
+      <div className="absolute inset-0 bg-scrim" onClick={onClose} aria-hidden="true" />
       <aside
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation menu"
         tabIndex={-1}
-        className="absolute inset-y-0 left-0 flex w-64 flex-col bg-gray-900 shadow-xl focus:outline-none"
+        className="absolute inset-y-0 left-0 flex w-64 flex-col bg-chrome shadow-xl focus:outline-none"
       >
         <div className="flex items-center justify-between pr-3">
           <Brand />
-          <button type="button" onClick={onClose} className="rounded-lg p-2 text-gray-300 hover:bg-gray-800" aria-label="Close menu">
+          <button type="button" onClick={onClose} className="rounded-lg p-2 text-chrome-muted hover:bg-chrome-hover" aria-label="Close menu">
             <Icon name="close" />
           </button>
         </div>
@@ -84,7 +84,7 @@ export default function Sidebar({ navItems, open, onClose }) {
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-gray-900 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-chrome-line bg-chrome lg:flex">
         <Brand />
         <Links navItems={navItems} />
       </aside>

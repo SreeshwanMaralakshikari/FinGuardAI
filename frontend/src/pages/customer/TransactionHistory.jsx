@@ -28,6 +28,7 @@ import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
 import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
+import WasThisYou from '../../components/common/WasThisYou.jsx';
 
 const EMPTY_FILTERS = { riskLevel: '', paymentMethod: '', startDate: '', endDate: '' };
 
@@ -158,6 +159,8 @@ export default function TransactionHistory() {
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
               <ScoreBar value={t.fraudScore} riskLevel={t.riskLevel} label="Fraud score" />
             </div>
+
+            <WasThisYou key={t._id} transaction={t} />
 
             <FraudExplanation scoring={t.scoring} breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 

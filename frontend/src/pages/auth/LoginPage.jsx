@@ -20,6 +20,7 @@ import { BTN } from '../../utils/common.js';
 import AuthShell from '../../components/shared/AuthShell.jsx';
 import FormField from '../../components/common/FormField.jsx';
 import Alert from '../../components/common/Alert.jsx';
+import { DEMO_LOGINS_ENABLED, DEMO_ACCOUNTS } from '../../utils/demoLogins.js';
 
 export default function LoginPage() {
   const dispatch = useAppDispatch();
@@ -30,6 +31,7 @@ export default function LoginPage() {
     register, handleSubmit, formState: { errors, isSubmitting },
   } = useForm({ defaultValues: { email: '', password: '' } });
 
+  const [demoBusy, setDemoBusy] = useState(false); // R4-05
   const [notice, setNotice] = useState(peekSessionNotice); // read in render (safe for StrictMode), cleared below
 
   useEffect(() => { clearSessionNotice(); }, []);
@@ -39,13 +41,14 @@ export default function LoginPage() {
     return <Navigate to={resolvePostLogin(user.role, from)} replace />;
   }
 
-  const onSubmit = async (values) => {
+  const signIn = async (email, password) => {
     setNotice('');
-    const action = await dispatch(loginThunk({ email: values.email.trim(), password: values.password }));
+    const action = await dispatch(loginThunk({ email, password }));
     if (loginThunk.fulfilled.match(action)) {
       navigate(resolvePostLogin(action.payload.role, from), { replace: true });
     }
   };
+  const onSubmit = (values) => signIn(values.email.trim(), values.password);
 
   return (
     <AuthShell
@@ -93,6 +96,26 @@ export default function LoginPage() {
           {isSubmitting ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
+
+      {DEMO_LOGINS_ENABLED && (
+        <div className="mt-6 border-t border-gray-200 pt-5" data-testid="demo-logins">
+          <p className="text-sm font-medium text-gray-900">Just looking around?</p>
+          <p className="mt-0.5 text-xs text-gray-500">Shared demo accounts with sample data. Anything you do there is visible to other visitors.</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {DEMO_ACCOUNTS.map((d) => (
+              <button
+                key={d.key}
+                type="button"
+                disabled={demoBusy}
+                onClick={async () => { setDemoBusy(true); await signIn(d.email, d.password); setDemoBusy(false); }}
+                className={`${BTN.base} ${BTN.secondary} ${BTN.md}`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </AuthShell>
   );
 }

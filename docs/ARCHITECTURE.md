@@ -19,7 +19,7 @@ erDiagram
 | Collection | Purpose | Notes |
 |---|---|---|
 | User | Account, role (CUSTOMER / ANALYST / ADMIN), trust score | `password` is `select:false` and stripped by `toJSON`; `sessionsRevokedAt` ends sessions on deactivation; `isSimulated` marks demo users |
-| Transaction | One payment with its fraud score, reasons and per-rule `scoreBreakdown` | Public id `TXN-YYYY-NNNNN`; status APPROVED / HELD / BLOCKED; optional `idempotencyKey` (hidden); Phase 10 `scoring` = engine (ML / RULES), rule score, model version, SHAP values, fallback reason |
+| Transaction | One payment with its fraud score, reasons and per-rule `scoreBreakdown` | Public id `TXN-YYYY-NNNNN`; status APPROVED / HELD / BLOCKED; optional `idempotencyKey` (hidden); Phase 10 `scoring` = engine (ML / RULES), rule score, ML score, rule floor, ML latency, model version, SHAP values, fallback reason; Round 4 `customerResponse` (answer, note, time) |
 | FraudAlert | Raised for MEDIUM, HIGH, CRITICAL | One per transaction (unique); status OPEN / REVIEWED / DISMISSED / ACKNOWLEDGED; Phase 10 `scoringEngine`, `modelVersion` |
 | FraudCase | Analyst investigation | Public id `CASE-YYYY-NNNNN`; OPEN → ASSIGNED → UNDER_REVIEW → RESOLVED (fraud confirmed) or DISMISSED (false positive) |
 | BehaviorProfile | Learned usual amounts, cities, hours, devices of a customer | Built from the newest 500 trusted transactions |
@@ -41,6 +41,7 @@ erDiagram
 | | `GET /customer-api/fraud-alerts`, `GET /customer-api/fraud-alerts/:id`, `PATCH /customer-api/fraud-alerts/:id/acknowledge` (MEDIUM only) | CUSTOMER |
 | | `GET /customer-api/timeline`, `GET /customer-api/trust-score`, `GET/PATCH /customer-api/profile` | CUSTOMER |
 | | `POST /customer-api/ml-warm-up` (wakes a sleeping ML service; 202 at once) | CUSTOMER |
+| | `POST /customer-api/transactions/:id/response` (Round 4 "Was this you?": CONFIRMED / DISPUTED + note on a HELD / BLOCKED payment with an open alert; evidence only, notifies analysts) | CUSTOMER |
 | Notifications | `GET /notification-api/notifications`, `PATCH .../read-all`, `GET .../unread-count`, `PATCH .../:id/read` | CUSTOMER, ANALYST |
 | Analyst | `GET /analyst-api/flagged-transactions`, `GET .../flagged-transactions/:id` (HIGH/CRITICAL only) | ANALYST |
 | | `POST /analyst-api/cases`, `GET /analyst-api/cases`, `GET .../cases/:id`, `PATCH .../cases/:id/assign`, `PATCH .../cases/:id/status`, `POST .../cases/:id/notes` | ANALYST |

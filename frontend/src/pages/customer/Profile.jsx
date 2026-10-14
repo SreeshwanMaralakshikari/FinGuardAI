@@ -108,7 +108,7 @@ export default function Profile() {
             {shownImage ? (
               <img src={shownImage} alt="Profile" className="h-20 w-20 rounded-full object-cover" />
             ) : (
-              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-600 text-2xl font-semibold text-white" aria-hidden="true">
+              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-600 text-2xl font-semibold text-on-accent" aria-hidden="true">
                 {getInitials(data?.name ?? authUser?.name)}
               </span>
             )}

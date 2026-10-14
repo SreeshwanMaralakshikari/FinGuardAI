@@ -4,17 +4,19 @@
  *   Both series are in the same unit (transactions per day) on one axis. A legend is always
  *   shown for two series, and the dashed/solid difference means colour is never the only cue.
  *   A-04: optional `forecast` ({ available, days[] } from GET /admin-api/analytics/trends) adds a third,
- *   dashed purple series "Forecast (next 7 days, linear trend)". It lives under its own key (`forecast`),
+ *   dashed indigo series "Forecast (next 7 days, linear trend)". It lives under its own key (`forecast`),
  *   starts at the last real day so the line continues, and never touches the existing series.
  */
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CARD } from '../../utils/common.js';
+import { useChartColors, tooltipStyles } from '../../hooks/useChartColors.js';
 
 export const FORECAST_NAME = 'Forecast (next 7 days, linear trend)';
 const FORECAST_NOTE = 'No forecast yet: it needs at least 7 days with high-risk transactions in the last 14 days.';
 
 export default function TrendChart({ data, forecast = null, height = 300 }) {
   const empty = !data || data.every((d) => !d.count);
+  const c = useChartColors(); // R4-01: theme-aware colours
   const forecastDays = forecast?.available ? (forecast.days ?? []) : [];
   const hasForecast = forecastDays.length > 0 && !empty;
   const chartData = hasForecast
@@ -35,15 +37,15 @@ export default function TrendChart({ data, forecast = null, height = 300 }) {
           <div className="mt-4" style={{ height }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={{ top: 4, right: 12, bottom: 0, left: -12 }}>
-                <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#d1d5db' }} tickFormatter={(d) => d.slice(5)} minTickGap={24} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#6b7280' }} tickLine={false} axisLine={false} />
-                <Tooltip />
+                <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: c.tick }} tickLine={false} axisLine={{ stroke: c.axis }} tickFormatter={(d) => d.slice(5)} minTickGap={24} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: c.tick }} tickLine={false} axisLine={false} />
+                <Tooltip {...tooltipStyles(c)} />
                 <Legend verticalAlign="top" height={28} iconType="plainline" />
-                <Line type="monotone" dataKey="count" name="Transactions" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="movingAvg" name="7-day average" stroke="#ea580c" strokeWidth={2} strokeDasharray="6 4" dot={false} />
+                <Line type="monotone" dataKey="count" name="Transactions" stroke={c.brand} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                <Line type="monotone" dataKey="movingAvg" name="7-day average" stroke={c.average} strokeWidth={2} strokeDasharray="6 4" dot={false} />
                 {hasForecast && (
-                  <Line type="monotone" dataKey="forecast" name={FORECAST_NAME} stroke="#7c3aed" strokeWidth={2} strokeDasharray="2 4" dot={{ r: 2 }} connectNulls />
+                  <Line type="monotone" dataKey="forecast" name={FORECAST_NAME} stroke={c.forecast} strokeWidth={2} strokeDasharray="2 4" dot={{ r: 2 }} connectNulls />
                 )}
               </LineChart>
             </ResponsiveContainer>

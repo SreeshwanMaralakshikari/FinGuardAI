@@ -45,4 +45,9 @@ export const AUDIT_ACTIONS = Object.freeze([
   'THRESHOLDS_UPDATED', 'SIMULATION_STARTED', 'SIMULATION_STOPPED',
   'TRANSACTION_VIEWED', 'DEVICE_VIEWED',
   'ALERT_ACKNOWLEDGED', 'SIMULATION_DATA_GENERATED', 'SIMULATION_DATA_CLEARED',
+  'CUSTOMER_RESPONDED',
 ]);
+/** R4: the customer's answer to "Was this you?" on a held / blocked payment. */
+export const CUSTOMER_RESPONSES = Object.freeze(['CONFIRMED', 'DISPUTED']);
+/** In-app notification types (NotificationModel.type). R4 adds CUSTOMER_RESPONSE for analysts. */
+export const NOTIFICATION_TYPES = Object.freeze(['FRAUD_ALERT', 'CASE_ASSIGNED', 'CASE_STATUS_CHANGED', 'CUSTOMER_RESPONSE']);

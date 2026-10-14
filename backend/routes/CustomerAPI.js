@@ -4,12 +4,13 @@ import { transactionLimiter, profileUpdateLimiter } from '../middleware/rateLimi
 import validate from '../middleware/validate.js';
 import asyncHandler from '../middleware/asyncHandler.js';
 import { parsePagination, buildPagination } from '../utils/pagination.js';
-import { submitTransactionRules } from '../validators/transactionValidators.js';
+import { submitTransactionRules, customerResponseRules } from '../validators/transactionValidators.js';
 import { customerAlertsQueryRules, customerTransactionsQueryRules, customerTimelineQueryRules } from '../validators/queryValidators.js';
 import uploadMiddleware, { requireImageContent } from '../middleware/uploadMiddleware.js';
 import createAuditLog from '../utils/createAuditLog.js';
 import { processTransaction, buildTransactionResponse } from '../services/transactionService.js';
 import { getMlClient } from '../services/scoringService.js';
+import { recordCustomerResponse, CustomerResponseError } from '../services/customerResponseService.js';
 import { buildDateRange } from '../utils/dateRange.js';
 import { OUTCOME_TITLES } from '../utils/caseWorkflow.js';
 import { formatRupees } from '../utils/normalize.js';
@@ -115,6 +116,32 @@ router.get(
       success: true,
       data: { transaction, deviceReputation: deviceReputation ?? null },
     });
+  })
+);
+
+// ── POST /customer-api/transactions/:id/response ──────────────────────────────
+// R4 "Was this you?": the customer confirms or disputes one of their HELD / BLOCKED payments while its alert is
+// still open. Evidence for the analyst only: the payment's status does not change (services/customerResponseService.js).
+router.post(
+  '/transactions/:id/response',
+  customerResponseRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    try {
+      const transaction = await recordCustomerResponse({
+        user: req.user, transactionId: req.params.id, answer: req.body.answer, note: req.body.note ?? '', ip: req.ip,
+      });
+      res.status(200).json({
+        success: true,
+        message: req.body.answer === 'DISPUTED'
+          ? 'Thank you. The fraud team has been told you did not make this payment.'
+          : 'Thank you. The fraud team has been told you made this payment.',
+        data: { id: transaction._id, publicId: transaction.publicId, status: transaction.status, customerResponse: transaction.customerResponse },
+      });
+    } catch (err) {
+      if (err instanceof CustomerResponseError) return res.status(err.status).json({ success: false, message: err.message });
+      throw err;
+    }
   })
 );
 

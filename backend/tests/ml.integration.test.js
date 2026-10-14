@@ -127,7 +127,8 @@ describe('ML engine in processTransaction', () => {
     const { user } = await seedUser();
     const { transaction } = await submit(user);
     const stored = await TransactionModel.findById(transaction._id).lean();
-    expect(stored.scoring).toEqual({ engine: 'RULES', ruleScore: stored.fraudScore, fallbackReason: 'TIMEOUT' });
+    expect(stored.scoring).toEqual({ engine: 'RULES', ruleScore: stored.fraudScore, fallbackReason: 'TIMEOUT', mlLatencyMs: expect.any(Number) });
+    expect(stored.scoring.mlLatencyMs).toBeGreaterThanOrEqual(450); // R4-04: the payment waited about ML_TIMEOUT_MS (500 here)
     expect(stored.fraudScore).toBe(stored.scoreBreakdown.reduce((sum, r) => sum + r.points, 0));
   });
 

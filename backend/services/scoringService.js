@@ -21,7 +21,7 @@
  *
  *   Returned object = checkFraud's result shape ({ fraudScore, riskLevel, reasons, recommendedAction,
  *   estimatedLoss, signals, breakdown, rawScore }) plus `scoring`, stored on the Transaction:
- *     { engine: 'ML'|'RULES', ruleScore, mlScore?, ruleFloor?, modelVersion?, fraudProbability?,
+ *     { engine: 'ML'|'RULES', ruleScore, mlScore?, ruleFloor?, mlLatencyMs?, modelVersion?, fraudProbability?,
  *       fallbackReason?, signals?, shapBaseValue?, shapValues?: [{ feature, label, value, shap }] }
  */
 import { checkFraud, decisionForScore, resolveThresholds, hardRuleSignals } from './fraudDetectionService.js';
@@ -107,6 +107,9 @@ export const scoreTransaction = async ({
 
   const effective = resolveThresholds(thresholds);
   let prediction;
+  const started = performance.now();
+  // R4-04: how long the ML call took (shown in the scoring pipeline view); none when it was skipped (COOLDOWN)
+  const elapsed = () => Math.round(performance.now() - started);
   try {
     const features = buildMlFeatures({
       transaction,
@@ -121,8 +124,10 @@ export const scoreTransaction = async ({
     if (fallbackReason === 'ERROR') console.error('[scoringService] unexpected ML error — rule engine used:', err);
     // E-06: the same id is in the ML service's log line (X-Request-Id), so the two can be matched.
     else if (fallbackReason !== 'COOLDOWN') console.warn(`[scoringService] ML not used (${fallbackReason}); rule engine scored request ${requestId ?? '(no id)'}`);
-    return { ...rules, scoring: { ...ruleScoring, fallbackReason } };
+    const waited = fallbackReason === 'COOLDOWN' ? {} : { mlLatencyMs: elapsed() };
+    return { ...rules, scoring: { ...ruleScoring, fallbackReason, ...waited } };
   }
+  const mlLatencyMs = elapsed();
 
   const mlScore = prediction.fraudScore;
   const hard = hardRuleSignals({ transaction, deviceReputation, thresholds });
@@ -163,6 +168,7 @@ export const scoreTransaction = async ({
       engine: 'ML',
       ruleScore: rules.fraudScore,
       mlScore,                                         // the model's own score (fraudScore differs only with the floor)
+      mlLatencyMs,                                     // R4-04: round trip to the ML service
       ...(floored !== null ? { ruleFloor: true } : {}),
       modelVersion: prediction.modelVersion,
       fraudProbability: prediction.fraudProbability,

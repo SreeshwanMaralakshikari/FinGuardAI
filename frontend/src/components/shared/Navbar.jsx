@@ -15,6 +15,7 @@ import { logoutThunk } from '../../store/slices/authSlice.js';
 import { getInitials, BTN } from '../../utils/common.js';
 import { ROLES } from '../../utils/constants.js';
 import Icon from '../common/Icon.jsx';
+import ThemeToggle from '../common/ThemeToggle.jsx';
 import NotificationPanel from './NotificationPanel.jsx';
 
 export const LOGOUT_FAILED_MESSAGE =
@@ -43,13 +44,14 @@ export default function Navbar({ onMenuClick }) {
       <div className="hidden lg:block" />
 
       <div className="flex items-center gap-2 sm:gap-3">
+        <ThemeToggle />
         {user?.role !== ROLES.ADMIN && <NotificationPanel />}
 
         <div className="flex items-center gap-2">
           {user?.profileImage ? (
             <img src={user.profileImage} alt="" className="h-9 w-9 rounded-full object-cover" />
           ) : (
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-white" aria-hidden="true">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-on-accent" aria-hidden="true">
               {getInitials(user?.name)}
             </span>
           )}

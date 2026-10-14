@@ -455,11 +455,11 @@ const luminance = (hex) => {
 };
 
 describe('R-07 score breakdown contrast', () => {
-  it('every segment is white text on a shade with >= 4.5:1 contrast', () => {
+  it('every segment is text-on-accent (white in the light theme) on a shade with >= 4.5:1 contrast', () => {
     const rows = ['velocity', 'amount', 'location', 'device', 'time', 'merchant'].map((rule) => ({ rule, label: rule, points: 5, max: 10 }));
     const { container } = render(<ScoreBreakdown breakdown={rows} />);
     const used = new Set();
-    for (const el of container.querySelectorAll('[class*="bg-"][class*="text-white"]')) {
+    for (const el of container.querySelectorAll('[class*="bg-"][class*="text-on-accent"]')) {
       const shade = /bg-([a-z]+-\d+)/.exec(el.className)[1];
       used.add(shade);
       expect(HEX[shade], `unknown shade ${shade}`).toBeDefined();

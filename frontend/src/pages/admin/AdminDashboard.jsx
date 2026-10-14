@@ -25,7 +25,8 @@ import { RiskBadge } from '../../components/common/Badges.jsx';
 import MlStatusCard from '../../components/common/MlStatusCard.jsx';
 
 const RISK_ORDER = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const RISK_HEX = { LOW: '#059669', MEDIUM: '#ca8a04', HIGH: '#ea580c', CRITICAL: '#dc2626' };
+// R4-01: theme colour keys (resolved by BarCard through useChartColors), so the bars follow the theme
+const RISK_HEX = { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' };
 
 /** "dev_4f9a2c81e07b" → "dev_4f…e07b" (the full id stays in the tooltip / table) */
 const shortId = (id) => { const t = String(id ?? 'Unknown'); return t.length > 14 ? `${t.slice(0, 6)}…${t.slice(-4)}` : t; };

@@ -83,7 +83,7 @@ router.get(
         .skip(skip)
         .limit(Number(limit))
         .populate('userId', 'name email trustScore')
-        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore reasons recommendedAction status timestamp deviceId ipAddress'),
+        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore reasons recommendedAction status timestamp deviceId ipAddress customerResponse'),
       TransactionModel.countDocuments(filter),
     ]);
 

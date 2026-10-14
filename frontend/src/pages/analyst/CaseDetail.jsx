@@ -35,6 +35,7 @@ import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
 import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, CaseStatusBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
+import CustomerResponseNote from '../../components/common/CustomerResponseNote.jsx';
 
 
 const CLOSING = ['RESOLVED', 'DISMISSED'];
@@ -95,6 +96,7 @@ function CaseTransaction({ tx }) {
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Fraud score</p>
         <ScoreBar value={tx.fraudScore} riskLevel={tx.riskLevel} label="Fraud score" />
       </div>
+      {tx.customerResponse?.answer && <div className="mt-4"><CustomerResponseNote response={tx.customerResponse} /></div>}
       {(tx.scoreBreakdown?.length > 0 || tx.scoring) && (
         <div className="mt-4"><FraudExplanation scoring={tx.scoring} breakdown={tx.scoreBreakdown} fraudScore={tx.fraudScore} /></div>
       )}

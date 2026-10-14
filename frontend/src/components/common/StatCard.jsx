@@ -8,7 +8,7 @@ export default function StatCard({ label, value, hint = null, loading = false })
   return (
     <div className={`${CARD.base} p-5`}>
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-gray-900">
+      <p className="mt-2 font-display text-3xl font-bold tabular-nums text-gray-900">
         {loading ? (
           <>
             <span className="inline-block h-7 w-20 animate-pulse rounded bg-gray-100" aria-hidden="true" />

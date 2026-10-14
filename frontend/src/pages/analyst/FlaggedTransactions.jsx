@@ -36,6 +36,7 @@ import DetailRow from '../../components/common/DetailRow.jsx';
 import ScoreBar from '../../components/common/ScoreBar.jsx';
 import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge, CaseStatusBadge, AlertStatusBadge } from '../../components/common/Badges.jsx';
+import CustomerResponseNote from '../../components/common/CustomerResponseNote.jsx';
 
 // F-11: "Export CSV" writes the rows of the page that is loaded right now.
 const CSV_COLUMNS = [
@@ -103,6 +104,8 @@ function InvestigationDetail({ ctx, t, dev, note, onNote, creating, onOpenCase, 
         <ScoreBar value={t.fraudScore} riskLevel={t.riskLevel} label="Fraud score" />
         {t.reasons?.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-gray-700">{t.reasons.map((r) => <li key={r}>{r}</li>)}</ul>}
       </div>
+
+      <CustomerResponseNote response={t.customerResponse} />
 
       <FraudExplanation scoring={t.scoring} breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 

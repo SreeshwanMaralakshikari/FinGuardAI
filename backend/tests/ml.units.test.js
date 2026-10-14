@@ -320,7 +320,7 @@ describe('scoreTransaction', () => {
     const client = fakeClient(async () => { throw new MlScoringError('TIMEOUT', 'slow'); });
     const out = await scoreTransaction({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null, mlClient: client });
     const rules = checkFraud({ transaction: tx, behaviorProfile: profile, deviceReputation: null, thresholds: null });
-    expect(out).toEqual({ ...rules, scoring: { engine: 'RULES', ruleScore: rules.fraudScore, fallbackReason: 'TIMEOUT' } });
+    expect(out).toEqual({ ...rules, scoring: { engine: 'RULES', ruleScore: rules.fraudScore, fallbackReason: 'TIMEOUT', mlLatencyMs: expect.any(Number) } });
   });
 
   it('an unexpected error is ERROR (logged), still the rule result', async () => {
@@ -595,5 +595,18 @@ describe('ML labels format like the ML reasons (E-05)', () => {
     expect(ML_FEATURE_LABELS.amountToAvgRatio.format(21.74)).toBe('21.7×');
     expect(ML_FEATURE_LABELS.amountToMaxRatio.format(543478.26)).toBe('5,43,478.3×');
     expect(ML_FEATURE_LABELS.amount.format(150000)).toBe('₹1,50,000');
+  });
+});
+
+describe('ML latency in the scoring block (R4-04)', () => {
+  const tx = { ...TXN };
+  it('an ML answer records the round trip; a skipped call (COOLDOWN) records none', async () => {
+    const answered = { predict: jest.fn(async () => parsePrediction(mlAnswer({ fraudScore: 2 }))), wakeUp: jest.fn(), status: jest.fn() };
+    const out = await scoreTransaction({ transaction: tx, behaviorProfile: null, deviceReputation: null, thresholds: null, mlClient: answered });
+    expect(out.scoring.mlLatencyMs).toEqual(expect.any(Number));
+    expect(out.scoring.mlLatencyMs).toBeGreaterThanOrEqual(0);
+    const skipped = { predict: jest.fn(async () => { throw new MlScoringError('COOLDOWN', 'x'); }), wakeUp: jest.fn(), status: jest.fn() };
+    const out2 = await scoreTransaction({ transaction: tx, behaviorProfile: null, deviceReputation: null, thresholds: null, mlClient: skipped });
+    expect(out2.scoring).toEqual({ engine: 'RULES', ruleScore: out2.fraudScore, fallbackReason: 'COOLDOWN' });
   });
 });

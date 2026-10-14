@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import {
   PAYMENT_METHODS, RISK_LEVELS, TRANSACTION_STATUSES,
-  SCORING_ENGINES, ML_FEATURE_KEYS, ML_FALLBACK_REASONS, ML_SIGNAL_TYPES,
+  SCORING_ENGINES, ML_FEATURE_KEYS, ML_FALLBACK_REASONS, ML_SIGNAL_TYPES, CUSTOMER_RESPONSES,
 } from '../utils/enums.js';
 
 const { Schema } = mongoose;
@@ -43,12 +43,23 @@ const scoringSchema = new Schema(
     ruleScore:        { type: Number, min: 0, max: 100, required: true },  // the rule engine's score, for comparison
     mlScore:          { type: Number, min: 0, max: 100 },                  // the model's own score (engine ML)
     ruleFloor:        { type: Boolean },                                   // true: a hard rule signal raised the ML score
+    mlLatencyMs:      { type: Number, min: 0 },                            // R4-04: ML round trip (absent when ML was not called)
     modelVersion:     { type: String, maxlength: 64 },
     fraudProbability: { type: Number, min: 0, max: 1 },
     fallbackReason:   { type: String, enum: [...ML_FALLBACK_REASONS] },     // only when ML was enabled but not used
     signals:          { type: [{ type: String, enum: [...ML_SIGNAL_TYPES] }], default: undefined },
     shapBaseValue:    { type: Number },
     shapValues:       { type: [shapValueSchema], default: undefined },
+  },
+  { _id: false }
+);
+
+// R4: the customer's answer to "Was this you?" on a HELD / BLOCKED payment (set once; analysts see it).
+const customerResponseSchema = new Schema(
+  {
+    answer:      { type: String, enum: [...CUSTOMER_RESPONSES], required: true },
+    note:        { type: String, trim: true, maxlength: 300, default: '' },
+    respondedAt: { type: Date, required: true },
   },
   { _id: false }
 );
@@ -142,6 +153,10 @@ const transactionSchema = new Schema(
     scoreBreakdown: {
       type: [scoreBreakdownSchema],
       default: [],
+    },
+    // R4: absent until the customer answers "Was this you?"
+    customerResponse: {
+      type: customerResponseSchema,
     },
     // Phase 10: absent on transactions scored before Phase 10 (the UI then shows the rule breakdown only).
     scoring: {

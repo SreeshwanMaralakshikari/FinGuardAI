@@ -21,6 +21,7 @@ const PANEL_ID = 'notification-panel';
 /** Where a notification should take the user. */
 function targetFor(n, role) {
   if (n.relatedEntityType === 'FRAUD_CASE' && n.relatedEntityId) return `/analyst/cases/${n.relatedEntityId}`;
+  if (n.type === 'CUSTOMER_RESPONSE' && role === 'ANALYST') return '/analyst/flagged-transactions'; // R4: no case yet
   if (role === 'CUSTOMER') return '/customer/fraud-alerts';
   return null;
 }
@@ -90,7 +91,7 @@ export default function NotificationPanel() {
       >
         <Icon name="bell" />
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold text-on-accent">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}

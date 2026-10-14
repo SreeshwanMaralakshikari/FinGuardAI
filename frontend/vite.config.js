@@ -61,6 +61,8 @@ export function assertBuildApiUrl(value, mode, name = 'VITE_API_URL') {
   }
 }
 
+const stripSlash = (url) => String(url ?? '').trim().replace(/\/+$/, '');
+
 export default defineConfig(({ command, mode }) => {
   // Loads .env, .env.[mode], .env.[mode].local AND matching process.env
   // variables (Vercel injects dashboard variables into process.env).
@@ -72,10 +74,15 @@ export default defineConfig(({ command, mode }) => {
     if (env.VITE_SOCKET_URL) assertBuildApiUrl(env.VITE_SOCKET_URL, mode, 'VITE_SOCKET_URL');
   }
 
+  // R4-06: link previews (Open Graph) need an ABSOLUTE image URL. VITE_SITE_URL wins; on Vercel the production
+  // domain is provided automatically (VERCEL_PROJECT_PRODUCTION_URL); otherwise the path stays relative.
+  const siteUrl = stripSlash(env.VITE_SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : ''));
+
   return {
     plugins: [
       react(),
       tailwindcss(),
+      { name: 'finguard-site-url', transformIndexHtml: (html) => html.replaceAll('__SITE_URL__', siteUrl) },
     ],
 
     server: {
