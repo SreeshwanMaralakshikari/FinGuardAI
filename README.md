@@ -33,8 +33,9 @@ It is a student project on digital payment fraud in India, built with React, Nod
 - Watch live alerts, trends and a 7-day forecast.
 - Tune the risk bands with a what-if preview.
 - Manage users, read the audit log, generate demo data and see which engine is scoring payments.
+- Check the model in real use on **Model insights**: how often it agrees with the rule engine, the biggest disagreements, what it leans on, and how analysts' decisions turned out.
 
-**Everyone** gets a light theme and a dark "night watch" theme. The app follows the device setting until you pick one.
+**Everyone** gets a light theme and a dark "night watch" theme. The app follows the device setting until you pick one. The **model card** (`/model`, no sign-in needed) explains what the model was trained on, how well it works, what it looks at and where its limits are.
 
 | Result of a held payment (dark theme) | Analyst view with the customer's answer |
 |---|---|
@@ -71,7 +72,7 @@ Both engines were measured on 1,13,574 simulated payments from 1,200 customers t
 | Fraud caught before money moves (HIGH or above) | **68 %** | 35 % |
 | Honest payments wrongly held or blocked | **47** | 241 |
 
-The data is simulated in FinGuardAI's own format, because public fraud datasets lack signals such as usual cities, known devices and device trust. These numbers show the method works; they are not a measurement on real bank traffic. Limitations are listed in [`ml-service/README.md`](ml-service/README.md).
+The data is simulated in FinGuardAI's own format, because public fraud datasets lack signals such as usual cities, known devices and device trust. These numbers show the method works; they are not a measurement on real bank traffic. Limitations are listed in [`ml-service/README.md`](ml-service/README.md) and on the app's public model card ([`/model`](https://fin-guard-ai-woad.vercel.app/model)).
 
 ## Repository layout
 
@@ -81,6 +82,7 @@ frontend/     React 19 + Vite 8 + Tailwind 4 + Redux Toolkit                    
 ml-service/   Flask + XGBoost + TreeSHAP, synthetic data generator, training, evaluation → Render
 docs/         Architecture, Phase 10 (ML) notes, audits, screenshots
 FIX_LOG.md    What each review round fixed
+.github/      CI workflow (tests for all three parts on every push)
 ```
 
 ## Run it locally
@@ -131,11 +133,13 @@ To show one-click "Try as a customer / analyst" buttons on the login page, set `
 
 | Part | Command | Tests |
 |---|---|---|
-| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 572 |
-| Frontend | `cd frontend && npm test` | 598 (+ coverage gates with `npm run test:coverage`) |
+| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 577 |
+| Frontend | `cd frontend && npm test` | 605 (+ coverage gates with `npm run test:coverage`) |
 | ML service | `cd ml-service && pip install -r requirements-train.txt && python -m pytest -q` | 106 |
 
 Lint: `npm run lint` in `backend` and `frontend`, `ruff check .` in `ml-service`.
+
+**Continuous integration.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all of the above on GitHub Actions for every push and pull request: three parallel jobs, a throw-away MongoDB 8 container for the backend, and no secrets. Results are on the repository's *Actions* tab.
 
 ## Deployment
 

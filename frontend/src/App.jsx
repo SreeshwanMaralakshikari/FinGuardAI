@@ -40,6 +40,7 @@ const FraudPatterns       = lazy(() => import('./pages/analyst/FraudPatterns.jsx
 
 const AdminDashboard      = lazy(() => import('./pages/admin/AdminDashboard.jsx'));
 const AdminTrends         = lazy(() => import('./pages/admin/AdminTrends.jsx'));
+const ModelInsights       = lazy(() => import('./pages/admin/ModelInsights.jsx')); // R4-08
 const UserManagement      = lazy(() => import('./pages/admin/UserManagement.jsx'));
 const SimulationPanel     = lazy(() => import('./pages/admin/SimulationPanel.jsx'));
 const ThresholdConfig     = lazy(() => import('./pages/admin/ThresholdConfig.jsx'));
@@ -137,6 +138,7 @@ export default function App() {
               <Route element={<AdminLayout />}>
                 <Route path="/admin"            element={<AdminDashboard />} />
                 <Route path="/admin/trends"     element={<AdminTrends />} />
+                <Route path="/admin/model"      element={<ModelInsights />} />
                 <Route path="/admin/users"      element={<UserManagement />} />
                 <Route path="/admin/simulation" element={<SimulationPanel />} />
                 <Route path="/admin/thresholds" element={<ThresholdConfig />} />

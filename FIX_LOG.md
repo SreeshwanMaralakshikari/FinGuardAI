@@ -3,6 +3,21 @@
 Newest round first. Rounds 2 and 3 (the two audits of the Phase 1–9 code) are documented in `docs/audit/`
 and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTEGRATION.md`.
 
+## Round 4, last part: model transparency and CI (15 Oct 2026)
+
+| ID | Change |
+|---|---|
+| R4-09 | **Public model card** at `/model` (no sign-in, outside the wake gate): purpose, training data, results against the rule engine, results by fraud type, calibration, what the model looks at, fairness and privacy, limitations, and how FinGuardAI uses it. Every number is in `components/modelcard/modelFacts.js`, and a test checks each one against `ml-service/model/model_meta.json` and `ml-service/reports/*.json`, so the card cannot drift from the model. Landing page links to it. |
+| R4-08 | **Admin "Model insights"** (`/admin/model`, `GET /admin-api/model-insights?days=7\|30\|90`): share of payments scored by the model and why the rules took over, policy-floor count, a 4 × 4 ML-band vs rule-band agreement table, the ten biggest disagreements, live mean \|SHAP\| over the last 500 model-scored payments, and closed-case outcomes by engine and by the customer's "Was this you?" answer. Uses only simple queries and `$group`, so it also runs on the test stand-in database. |
+| R4-12 | **GitHub Actions CI** (`.github/workflows/ci.yml`): on every push and pull request, three parallel jobs with no secrets: backend (ESLint, Jest with coverage, throw-away `mongo:8` container), frontend (ESLint, Vitest with coverage gates, production build) and ml-service (ruff, pytest). Checked with actionlint, and each job's steps were rehearsed from a clean clone. |
+| Housekeeping | Removed `backend/state.json`, a file the local test database stand-in wrote by accident (no secrets in it), and added it to `backend/.gitignore`. |
+
+Checks:
+- Backend: lint; 577 tests. On the stand-in database, the same 40 failures as before, caused by operators the stand-in lacks; the 5 new tests pass. 577/577 expected on real MongoDB (CI and Atlas).
+- Frontend: lint; 605/605 with the coverage gates; production build. All from a clean `npm ci`.
+- ML service: ruff clean; 106/106 in a fresh virtual environment.
+- axe-core WCAG 2 A/AA on `/model` and `/admin/model`, both themes: no violations. No horizontal scrolling at 375 px.
+
 ## Round 4: Guardian look and demo flow (14 Oct 2026)
 
 | ID | Change |

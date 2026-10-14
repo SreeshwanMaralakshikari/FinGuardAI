@@ -13,9 +13,9 @@ import { Link } from 'react-router-dom';
 import { waitForServer } from '../../api/serverHealth.js';
 import { BTN } from '../../utils/common.js';
 import Icon from '../../components/common/Icon.jsx';
-import ThemeToggle from '../../components/common/ThemeToggle.jsx';
 import ShieldMark from '../../components/common/ShieldMark.jsx';
 import ScoringReplay from '../../components/landing/ScoringReplay.jsx';
+import { PublicHeader, PublicFooter } from '../../components/landing/PublicChrome.jsx';
 
 const STATUS_TEXT = {
   checking: 'Checking the servers…',
@@ -91,19 +91,7 @@ export default function Landing() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
-        <Link to="/" className="flex items-center gap-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
-          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-600 text-on-accent"><Icon name="shield" /></span>
-          <span className="font-display text-2xl font-bold">FinGuard<span className="text-primary-600">AI</span></span>
-        </Link>
-        <nav className="flex items-center gap-1 sm:gap-2" aria-label="Account">
-          <ThemeToggle />
-          <Link to="/login" className={`${BTN.base} ${BTN.ghost} ${BTN.md} whitespace-nowrap`}>Sign in</Link>
-          <span className="hidden sm:inline">
-            <Link to="/register" className={`${BTN.base} ${BTN.primary} ${BTN.md}`}>Create account</Link>
-          </span>
-        </nav>
-      </header>
+      <PublicHeader />
 
       <main>
         <section className="bg-watch-grid">
@@ -159,6 +147,11 @@ export default function Landing() {
                 usual cities, known devices and device trust. These numbers show the method works; they are not a
                 measurement on real bank traffic.
               </p>
+              <p className="mt-4 text-sm">
+                <Link to="/model" className="font-medium text-primary-700 underline-offset-2 hover:underline">
+                  Read the model card: data, results by fraud type, fairness and limits
+                </Link>
+              </p>
             </div>
             <div className="space-y-8">
               {RESULTS.map((r) => {
@@ -202,12 +195,7 @@ export default function Landing() {
         </section>
       </main>
 
-      <footer className="border-t border-gray-200">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-8 text-sm text-gray-500 sm:px-6">
-          <p>FinGuardAI is a student project on digital payment fraud in India.</p>
-          <p>React, Node.js, Express, MongoDB, Python, XGBoost and SHAP.</p>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }

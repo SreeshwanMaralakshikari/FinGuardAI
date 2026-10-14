@@ -1,5 +1,5 @@
 import express from 'express';
-import { body } from 'express-validator';
+import { body, query } from 'express-validator';
 import { verifyToken, authorizeRoles } from '../middleware/verifyToken.js';
 import validate from '../middleware/validate.js';
 import asyncHandler from '../middleware/asyncHandler.js';
@@ -13,6 +13,7 @@ import { simulationLimiter } from '../middleware/rateLimiter.js';
 import { buildForecast } from '../utils/forecast.js';
 import { riskLevelForScore, defaultScoreThresholds } from '../services/fraudDetectionService.js';
 import { getMlClient } from '../services/scoringService.js';
+import { getModelInsights, DEFAULT_INSIGHT_DAYS } from '../services/modelInsightsService.js';
 import { getMlSettings } from '../config/mlSettings.js';
 import {
   generateSimulation, clearSimulation, SimulationError, DEFAULT_SIM_COUNT,
@@ -797,6 +798,20 @@ router.get(
       modelVersion: null,
     };
     res.status(200).json({ success: true, data: { enabled: Boolean(client), ...state, last24h } });
+  })
+);
+
+// ── GET /admin-api/model-insights ──────────────────────────────────────────────
+// R4-08: how the ML model behaves in real use over the last `days` days (default 30, 1–365): engines and fallbacks,
+// ML-vs-rules band agreement, the biggest disagreements, live feature influence (mean |SHAP|) and case outcomes.
+router.get(
+  '/model-insights',
+  [query('days').optional().isInt({ min: 1, max: 365 }).withMessage('days must be a whole number from 1 to 365')],
+  validate,
+  asyncHandler(async (req, res) => {
+    // Express 5: req.query is read-only, so a sanitizer cannot convert it in place — convert here.
+    const data = await getModelInsights({ days: req.query.days === undefined ? DEFAULT_INSIGHT_DAYS : Number(req.query.days) });
+    res.status(200).json({ success: true, data });
   })
 );
 

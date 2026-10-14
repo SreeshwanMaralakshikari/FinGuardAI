@@ -1,0 +1,88 @@
+# FinGuardAI continuous integration: every push and pull request runs the three test suites.
+#   backend     — ESLint + 570+ Jest tests against a throw-away MongoDB 8 container
+#   frontend    — ESLint + Vitest (with the coverage gates) + a production build
+#   ml-service  — ruff + 106 pytest tests against the committed model (model/ is in git)
+# No secrets are needed: tests use their own JWT secret, a disposable database and fake ML keys.
+name: CI
+
+on:
+  push:            # every branch (works whether the default branch is main or master)
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Node 24, MongoDB 8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mongo:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      # The name must contain "test" (tests/setup.js refuses anything else).
+      MONGO_URI_TEST: mongodb://localhost:27017/finguardai_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:coverage
+
+  frontend:
+    name: Frontend (lint, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test:coverage
+      - name: Production build
+        run: npm run build
+        env:
+          # Only checks that the bundle builds; the real URL is set in Vercel.
+          VITE_API_URL: https://finguardai-api.example.com
+
+  ml-service:
+    name: ML service (Python 3.13)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ml-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: ml-service/requirements*.txt
+      - run: pip install -r requirements-train.txt ruff==0.16.8
+      - run: ruff check .
+      - run: python -m pytest -q

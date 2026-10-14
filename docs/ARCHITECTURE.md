@@ -52,6 +52,7 @@ erDiagram
 | | `POST /admin-api/simulation/start`, `.../stop`, `.../generate`, `DELETE .../simulation/data` | ADMIN |
 | | `GET /admin-api/audit-logs` | ADMIN |
 | | `GET /admin-api/ml-status` (Phase 10: engine state + last-24-hour counts; also wakes an idle ML service) | ADMIN |
+| | `GET /admin-api/model-insights?days=1–365` (Round 4, default 30: engine split and fallback reasons, policy-floor count, ML-vs-rules band agreement, biggest disagreements, live mean \|SHAP\| of the last 500 model-scored payments, closed-case outcomes by engine and by the customer's answer) | ADMIN |
 
 Errors use `{ success:false, message, errors? }`. Validation errors are HTTP 422; a dead (deactivated) session is 401 with `code:'ACCOUNT_DEACTIVATED'`.
 
@@ -59,7 +60,7 @@ Errors use `{ success:false, message, errors? }`. Validation errors are HTTP 422
 1. **Admin** logs in (seeded account) → Dashboard: *Fraud scoring engine* card (ML model or rule engine) → Simulation → *Generate demo transactions* (30) → Dashboard: KPIs, risk distribution, score histogram, top devices, high-risk by city and payment method; set a date range.
 2. **Customer** (`npm run seed:demo` accounts or register) → Submit a normal payment (approved, score 0) then a risky one (new city, large amount, new device) → see the score explanation (with ML on: *What moved the ML score* SHAP bars plus the rule engine's view for comparison), the HELD/BLOCKED status, then *Fraud alerts → Timeline*. Acknowledge a MEDIUM alert.
 3. **Analyst** → Flagged transactions → Investigate (device reputation, breakdown) → Open case → Assign to me → Start review → Resolve (fraud confirmed: payment becomes BLOCKED) or Dismiss (released). Export CSV.
-4. **Admin** → Trends (forecast), Thresholds → *Preview impact*, Audit logs, User management (deactivate a user: their open tab is signed out with a clear message) → Simulation → *Clear demo data*.
+4. **Admin** → Trends (forecast), *Model insights* (does the model agree with the rules? what is it leaning on?), Thresholds → *Preview impact*, Audit logs, User management (deactivate a user: their open tab is signed out with a clear message) → Simulation → *Clear demo data*.
 
 ## ML scoring service (Phase 10)
 
@@ -82,4 +83,17 @@ Customer pays ─► backend (transactionService) ─► scoringService
   dashboard wakes it in the background (never on a timer); during a cold start payments go straight to the rules.
 * Frontend: `FraudExplanation` shows the SHAP bars (`MlExplanation`) for ML-scored payments and the rule
   breakdown as a comparison; `MlStatusCard` on the admin dashboard.
+* Round 4: the public **model card** (`/model`, no sign-in; numbers from `ml-service/reports/`, checked by a test) and the
+  admin **Model insights** page (`/admin/model`, `services/modelInsightsService.js`).
 * Off by default: without `ML_ENABLED=true` every payment is scored by the rules exactly as before.
+
+## Front-end pages without sign-in
+
+`/` (landing page with the scoring replay) and `/model` (model card) are rendered by `Root.jsx` outside the server
+wake gate, so they appear instantly even while the Render API is asleep. Every other path goes to the signed-in app.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request, with three parallel jobs and no secrets:
+backend (ESLint, Jest with coverage, against a throw-away `mongo:8` service container), frontend (ESLint, Vitest with
+the coverage gates, production build) and ml-service (ruff, pytest against the committed model).

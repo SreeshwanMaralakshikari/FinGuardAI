@@ -26,6 +26,7 @@ export const ANALYST_NAV = [
 export const ADMIN_NAV = [
   { to: '/admin',            label: 'Dashboard',  icon: 'dashboard', end: true },
   { to: '/admin/trends',     label: 'Trends',     icon: 'trend' },
+  { to: '/admin/model',      label: 'Model insights', icon: 'network' }, // R4-08
   { to: '/admin/users',      label: 'Users',      icon: 'users' },
   { to: '/admin/simulation', label: 'Simulation', icon: 'play' },
   { to: '/admin/thresholds', label: 'Thresholds', icon: 'sliders' },

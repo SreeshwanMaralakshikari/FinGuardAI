@@ -102,6 +102,7 @@ export const API_PATHS = Object.freeze({
     SIMULATE_DATA:  '/admin-api/simulation/data',       // A-08 (DELETE)
     AUDIT_LOGS:     '/admin-api/audit-logs',
     ML_STATUS:      '/admin-api/ml-status',          // Phase 10 (GET)
+    MODEL_INSIGHTS: '/admin-api/model-insights',     // R4-08 (GET ?days=)
   }),
 
   NOTIFICATIONS: Object.freeze({
