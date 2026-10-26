@@ -3,6 +3,23 @@
 Newest round first. Rounds 2 and 3 (the two audits of the Phase 1–9 code) are documented in `docs/audit/`
 and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTEGRATION.md`.
 
+## Offline demo kit (26 Oct 2026)
+
+| Change | Details |
+|---|---|
+| Offline settings | `npm run offline:setup` writes `backend/.env.offline` (git-ignored): local MongoDB `finguardai_offline`, local ML service at `127.0.0.1:5001`, new local-only JWT secret and ML key, and the admin login and invite code copied from `.env`. The `*:offline` scripts start Node with `--env-file=.env.offline`, so `.env` (Atlas) is never changed. |
+| Copy the live data | `npm run offline:copy` copies every collection and index from the live database to the local one. Atlas is only read; the target must be on this machine and is replaced. |
+| Fresh data | `seed:admin:offline` and `seed:demo:offline`. The demo seed now adds an account-takeover payment for Aarav, so the "fraud confirmed" case exists with the ML model too (before, his casino payment stayed MEDIUM under the policy floor and that case was never created), and opens one case per customer. |
+| Launcher | `start-offline.cmd` / `start-offline.ps1` (Windows PowerShell 5.1): checks the setup and MongoDB, starts the ML service, waits until the model is loaded, then the API and website, and opens the browser. Already-running parts are reused. |
+| Avatar | A profile picture that cannot load (Cloudinary, offline) now falls back to the initials instead of a broken-image icon (`components/common/Avatar.jsx`, used by the navbar and profile page). |
+
+Checks: backend 590/590 on **real MongoDB 8.0** (13 new tests, including passwords with spaces, `#`, quotes and backslashes read identically by dotenv and Node's `--env-file`); frontend lint and 607/607 with coverage gates. The full offline path was rehearsed on real MongoDB:
+- a pretend "live" database seeded with ML scoring;
+- `offline:setup` and `offline:copy` (documents and indexes identical);
+- the launcher (run with PowerShell 7 and stand-ins for the Windows-only commands);
+- signing in with the copied admin (password with spaces and `#`), demo customer and analyst;
+- every admin page with no errors, and a new payment scored by the ML model.
+
 ## Round 4, last part: model transparency and CI (15 Oct 2026)
 
 | ID | Change |

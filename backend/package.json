@@ -14,7 +14,12 @@
     "lint": "eslint .",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage",
-    "seed:demo": "node scripts/seedDemoData.mjs"
+    "seed:demo": "node scripts/seedDemoData.mjs",
+    "offline:setup": "node scripts/offlineSetup.mjs",
+    "offline:copy": "node scripts/copyAtlasToLocal.mjs",
+    "start:offline": "node --env-file=.env.offline server.js",
+    "seed:admin:offline": "node --env-file=.env.offline seed/seedAdmin.js",
+    "seed:demo:offline": "node --env-file=.env.offline scripts/seedDemoData.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.0",

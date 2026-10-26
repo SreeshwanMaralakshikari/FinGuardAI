@@ -12,9 +12,10 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAppDispatch, useAppSelector } from '../../store/hooks.js';
 import { logoutThunk } from '../../store/slices/authSlice.js';
-import { getInitials, BTN } from '../../utils/common.js';
+import { BTN } from '../../utils/common.js';
 import { ROLES } from '../../utils/constants.js';
 import Icon from '../common/Icon.jsx';
+import Avatar from '../common/Avatar.jsx';
 import ThemeToggle from '../common/ThemeToggle.jsx';
 import NotificationPanel from './NotificationPanel.jsx';
 
@@ -48,13 +49,7 @@ export default function Navbar({ onMenuClick }) {
         {user?.role !== ROLES.ADMIN && <NotificationPanel />}
 
         <div className="flex items-center gap-2">
-          {user?.profileImage ? (
-            <img src={user.profileImage} alt="" className="h-9 w-9 rounded-full object-cover" />
-          ) : (
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-600 text-sm font-semibold text-on-accent" aria-hidden="true">
-              {getInitials(user?.name)}
-            </span>
-          )}
+          <Avatar src={user?.profileImage} name={user?.name} className="h-9 w-9" textClassName="text-sm" />
           <div className="hidden leading-tight sm:block">
             <p className="text-sm font-medium text-gray-900">{user?.name}</p>
             <p className="text-xs text-gray-500">{user?.role}</p>

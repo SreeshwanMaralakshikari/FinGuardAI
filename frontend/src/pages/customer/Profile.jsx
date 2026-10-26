@@ -15,7 +15,7 @@ import { updateUser } from '../../store/slices/authSlice.js';
 import api from '../../api/axios.js';
 import { getErrorMessage } from '../../api/errors.js';
 import { API_PATHS } from '../../utils/constants.js';
-import { BTN, CARD, formatDate, getInitials } from '../../utils/common.js';
+import { BTN, CARD, formatDate } from '../../utils/common.js';
 import { validateName } from '../../utils/forms.js';
 import { useFetch } from '../../hooks/useFetch.js';
 import PageHeader from '../../components/common/PageHeader.jsx';
@@ -25,6 +25,7 @@ import Alert from '../../components/common/Alert.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import DetailRow from '../../components/common/DetailRow.jsx';
 import ChangePasswordForm from '../../components/shared/ChangePasswordForm.jsx';
+import Avatar from '../../components/common/Avatar.jsx';
 
 const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -105,13 +106,7 @@ export default function Profile() {
           <Alert tone="error">{serverError}</Alert>
 
           <div className="flex items-center gap-4">
-            {shownImage ? (
-              <img src={shownImage} alt="Profile" className="h-20 w-20 rounded-full object-cover" />
-            ) : (
-              <span className="flex h-20 w-20 items-center justify-center rounded-full bg-primary-600 text-2xl font-semibold text-on-accent" aria-hidden="true">
-                {getInitials(data?.name ?? authUser?.name)}
-              </span>
-            )}
+            <Avatar src={shownImage} name={data?.name ?? authUser?.name} alt="Profile" className="h-20 w-20 shrink-0" textClassName="text-2xl" />
             <div className="min-w-0">
               <label htmlFor="profileImage" className="text-sm font-medium text-gray-700">Profile picture</label>
               <input key={fileInputKey} id="profileImage" type="file" accept="image/jpeg,image/png,image/webp" onChange={onPick} className="mt-1 block w-full max-w-full text-sm text-gray-600" />

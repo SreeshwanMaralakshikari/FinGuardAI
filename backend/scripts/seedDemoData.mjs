@@ -12,7 +12,7 @@
  *     $env:API_URL="https://your-api.onrender.com"; $env:ANALYST_INVITE_CODE="<code>"; npm run seed:demo
  *
  *   Creates 5 demo customers and 2 demo analysts (password: DEMO_PASSWORD, default
- *   "Demo@12345"), their transactions (LOW, MEDIUM, HIGH, CRITICAL) and a few cases
+ *   "Demo@12345"), their transactions (LOW, MEDIUM, HIGH, CRITICAL) and three cases
  *   (one resolved, one under review, one dismissed as a false positive).
  *   Safe to run again: existing demo users are logged in instead of re-created, and a
  *   customer that already has transactions is skipped. The admin account is NOT
@@ -80,8 +80,9 @@ const baseline = (tag, city) => [
 
 const CUSTOMERS = [
   { name: 'Aarav Sharma', email: `demo.aarav@${domain}`, tag: 'aarav', city: 'Mumbai',
-    risky: (t) => [tx(3000, 'Reliance Digital', 'ELECTRONICS', 'CARD', `${t}-laptop`, 'Bengaluru'),   // MEDIUM: new device + new city
-                   tx(60000, 'Casino Royale', 'CASINO', 'CARD', `${t}-phone`, 'Mumbai')] },            // HIGH
+    risky: (t) => [tx(3000, 'Reliance Digital', 'ELECTRONICS', 'CARD', `${t}-laptop`, 'Bengaluru'),   // new device + new city
+                   tx(60000, 'Casino Royale', 'CASINO', 'CARD', `${t}-phone`, 'Mumbai'),                // high-risk merchant (MEDIUM with ML: policy floor)
+                   tx(48000, 'Gadget Hub', 'ELECTRONICS', 'CARD', `${t}-unknown-phone`, 'Kolkata')] },  // account takeover: HIGH+ with either engine
   { name: 'Diya Patel', email: `demo.diya@${domain}`, tag: 'diya', city: 'Ahmedabad',
     risky: (t) => [tx(85000, 'CoinSwap Exchange', 'CRYPTO_EXCHANGE', 'NET_BANKING', `${t}-unknown`, 'Dubai', 'UAE')] }, // CRITICAL
   { name: 'Rohan Iyer', email: `demo.rohan@${domain}`, tag: 'rohan', city: 'Chennai',
@@ -127,9 +128,11 @@ async function main() {
     'demo.diya': { by: priya, steps: ['UNDER_REVIEW'], note: 'Foreign crypto purchase from an unknown device. Waiting for the customer to call back.' },
     'demo.rohan': { by: vikram, steps: ['DISMISSED'], summary: 'Customer verified the purchase by phone. False positive; payment released.' },
   };
+  const planned = new Set(); // one case per customer, even when several of their payments are flagged
   for (const item of flagged) {
     const key = Object.keys(plan).find((k) => (item.userId?.email ?? '').startsWith(k));
-    if (!key) continue;
+    if (!key || planned.has(key)) continue;
+    planned.add(key);
     const detail = must(await priya.call('GET', `/analyst-api/flagged-transactions/${item._id}`), 'flagged detail');
     if (detail.existingCase) { console.log(`  = ${item.publicId} already has case ${detail.existingCase.publicId}`); continue; }
     const { by, steps, summary, note } = plan[key];

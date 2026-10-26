@@ -83,6 +83,7 @@ ml-service/   Flask + XGBoost + TreeSHAP, synthetic data generator, training, ev
 docs/         Architecture, Phase 10 (ML) notes, audits, screenshots
 FIX_LOG.md    What each review round fixed
 .github/      CI workflow (tests for all three parts on every push)
+start-offline.cmd   Starts everything locally for an offline demo (docs/OFFLINE_DEMO.md)
 ```
 
 ## Run it locally
@@ -129,12 +130,16 @@ This creates 5 demo customers and 2 demo analysts (`demo.aarav@example.com`, `de
 
 To show one-click "Try as a customer / analyst" buttons on the login page, set `VITE_DEMO_LOGINS=true` on Vercel and redeploy. There is deliberately no demo **admin** button. Anyone who opens the site can use these accounts, so keep them demo-only.
 
+### Offline demo (no internet)
+
+The whole app (MongoDB, API, ML model and website) can run on one Windows laptop with Wi-Fi off, as a backup for live demos. One-time setup: `npm run offline:setup` and `npm run offline:copy` in `backend` (copies the live data). Then on the day, double-click `start-offline.cmd`. Step-by-step guide: [`docs/OFFLINE_DEMO.md`](docs/OFFLINE_DEMO.md).
+
 ## Tests
 
 | Part | Command | Tests |
 |---|---|---|
-| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 577 |
-| Frontend | `cd frontend && npm test` | 605 (+ coverage gates with `npm run test:coverage`) |
+| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 590 |
+| Frontend | `cd frontend && npm test` | 607 (+ coverage gates with `npm run test:coverage`) |
 | ML service | `cd ml-service && pip install -r requirements-train.txt && python -m pytest -q` | 106 |
 
 Lint: `npm run lint` in `backend` and `frontend`, `ruff check .` in `ml-service`.
@@ -161,6 +166,7 @@ After a release that adds indexes, run `npm run db:sync-indexes` once against th
 ## Documentation
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): models, request flow, every route.
+- [`docs/OFFLINE_DEMO.md`](docs/OFFLINE_DEMO.md): running the whole app without internet.
 - [`docs/PHASE_10_ML_INTEGRATION.md`](docs/PHASE_10_ML_INTEGRATION.md): ML decisions, results, verification.
 - [`ml-service/README.md`](ml-service/README.md): feature contract, training, evaluation, limitations.
 - [`FIX_LOG.md`](FIX_LOG.md) and [`docs/audit/`](docs/audit): review rounds.
