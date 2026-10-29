@@ -18,18 +18,26 @@ function Stop-WithMessage([string]$message) {
   exit 1
 }
 
-function Test-Port([int]$port) {
-  $client = New-Object System.Net.Sockets.TcpClient
+function Test-Address([string]$address, [int]$port) {
+  $client = $null
   try {
-    $attempt = $client.BeginConnect('127.0.0.1', $port, $null, $null)
+    $ip = [System.Net.IPAddress]::Parse($address)
+    $client = New-Object System.Net.Sockets.TcpClient($ip.AddressFamily)
+    $attempt = $client.BeginConnect($ip, $port, $null, $null)
     if (-not $attempt.AsyncWaitHandle.WaitOne(500)) { return $false }
     $client.EndConnect($attempt)
     return $true
   } catch {
     return $false
   } finally {
-    $client.Close()
+    if ($client) { $client.Close() }
   }
+}
+
+# On Windows "localhost" is often IPv6 (::1), so a part listening there counts as running too.
+function Test-Port([int]$port) {
+  if (Test-Address '127.0.0.1' $port) { return $true }
+  return (Test-Address '::1' $port)
 }
 
 function Wait-Port([int]$port, [string]$label, [int]$seconds) {
@@ -49,11 +57,12 @@ function Start-Window([string]$title, [string]$folder, [string]$command) {
 }
 
 Write-Host 'FinGuardAI offline start' -ForegroundColor Cyan
+Write-Host "Project folder: $root"
 Write-Host ''
 
 # 1. One-time preparation done?
 if (-not (Test-Path $envFile)) {
-  Stop-WithMessage "backend\.env.offline is missing. Run once (with internet):`n  cd backend`n  npm run offline:setup"
+  Stop-WithMessage "backend\.env.offline is missing in this folder:`n  $root`nIf you set it up in another copy of the project, start start-offline.cmd from that folder.`nOtherwise run once (with internet):`n  cd backend`n  npm run offline:setup"
 }
 foreach ($folder in @($backend, $frontend)) {
   if (-not (Test-Path (Join-Path $folder 'node_modules'))) {
@@ -89,10 +98,10 @@ if (Test-Port 5000) { Write-Host 'API already running' -ForegroundColor Green }
 else { Start-Window 'FinGuardAI API' $backend 'npm.cmd run start:offline' }
 
 if (Test-Port 3000) { Write-Host 'Website already running' -ForegroundColor Green }
-else { Start-Window 'FinGuardAI website' $frontend "`$env:VITE_DEV_BACKEND_URL = 'http://127.0.0.1:5000'; npm.cmd run dev" }
+else { Start-Window 'FinGuardAI website' $frontend "`$env:VITE_DEV_BACKEND_URL = 'http://127.0.0.1:5000'; `$env:VITE_DEV_HOST = '127.0.0.1'; npm.cmd run dev" }
 
 $null = Wait-Port 5000 'API' 60
-$siteUp = Wait-Port 3000 'website' 60
+$siteUp = Wait-Port 3000 'website' 120
 
 Write-Host ''
 if ($siteUp) {

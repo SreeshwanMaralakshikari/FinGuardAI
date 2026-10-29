@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { buildOfflineEnv, OFFLINE_DB_URI, OFFLINE_ML_URL } from '../scripts/offlineSetup.mjs';
 import { assertCopyTargets } from '../scripts/copyAtlasToLocal.mjs';
 import { getMlSettings } from '../config/mlSettings.js';
+import { checkNewPassword, passwordHint, DEMO_PASSWORD } from '../scripts/offlineAccounts.mjs';
 
 const LIVE = {
   ADMIN_EMAIL: 'admin@finguard.test',
@@ -96,5 +97,23 @@ describe('Atlas → local copy guard', () => {
     expect(() => assertCopyTargets(LIVE.MONGODB_URI, 'mongodb://127.0.0.1:27017')).toThrow(/must name a database/);
     expect(() => assertCopyTargets('mongodb+srv://u:p@c.mongodb.net/', local)).toThrow(/no database name/);
     expect(() => assertCopyTargets(local, local)).toThrow(/same database/);
+  });
+});
+
+describe('offline accounts tool', () => {
+  it('says where each password comes from, without printing the admin password', () => {
+    expect(passwordHint({ role: 'ADMIN', email: 'admin@finguard.test' }, 'Admin@FinGuard.test ')).toBe('ADMIN_PASSWORD in backend/.env.offline');
+    expect(passwordHint({ role: 'CUSTOMER', email: 'demo.aarav@example.com' })).toBe(`${DEMO_PASSWORD} (demo account)`);
+    expect(passwordHint({ role: 'ANALYST', email: 'demo.priya@example.com' })).toContain(DEMO_PASSWORD);
+    expect(passwordHint({ role: 'CUSTOMER', email: 'me@gmail.com' })).toMatch(/chosen at sign-up/);
+    expect(passwordHint({ role: 'CUSTOMER', email: 'demo.aarav@example.com.evil' })).toMatch(/chosen at sign-up/);
+  });
+
+  it('a new password follows the sign-up rules', () => {
+    expect(checkNewPassword('New-Pass-123')).toBeNull();
+    expect(checkNewPassword('short')).toMatch(/at least 8/);
+    expect(checkNewPassword('        ')).toMatch(/only spaces/);
+    expect(checkNewPassword('é'.repeat(37))).toMatch(/72 bytes/);
+    expect(checkNewPassword(undefined)).toMatch(/at least 8/);
   });
 });

@@ -19,7 +19,8 @@
     "offline:copy": "node scripts/copyAtlasToLocal.mjs",
     "start:offline": "node --env-file=.env.offline server.js",
     "seed:admin:offline": "node --env-file=.env.offline seed/seedAdmin.js",
-    "seed:demo:offline": "node --env-file=.env.offline scripts/seedDemoData.mjs"
+    "seed:demo:offline": "node --env-file=.env.offline scripts/seedDemoData.mjs",
+    "offline:accounts": "node --env-file=.env.offline scripts/offlineAccounts.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.0",

@@ -13,6 +13,8 @@ and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTE
 | Launcher | `start-offline.cmd` / `start-offline.ps1` (Windows PowerShell 5.1): checks the setup and MongoDB, starts the ML service, waits until the model is loaded, then the API and website, and opens the browser. Already-running parts are reused. |
 | Avatar | A profile picture that cannot load (Cloudinary, offline) now falls back to the initials instead of a broken-image icon (`components/common/Avatar.jsx`, used by the navbar and profile page). |
 
+| Windows fix (29 Oct) | On Windows the website's dev server listened on IPv6 `::1` (what `localhost` means there), so the launcher's IPv4 check never saw it and the browser did not open. The launcher now starts it with `VITE_DEV_HOST=127.0.0.1` (new optional setting in `vite.config.js`), checks both `127.0.0.1` and `::1`, and waits up to 2 minutes for the first start. `offline:accounts` columns now fit long emails. |
+
 Checks: backend 590/590 on **real MongoDB 8.0** (13 new tests, including passwords with spaces, `#`, quotes and backslashes read identically by dotenv and Node's `--env-file`); frontend lint and 607/607 with coverage gates. The full offline path was rehearsed on real MongoDB:
 - a pretend "live" database seeded with ML scoring;
 - `offline:setup` and `offline:copy` (documents and indexes identical);

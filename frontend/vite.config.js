@@ -87,6 +87,9 @@ export default defineConfig(({ command, mode }) => {
 
     server: {
       port: 3000,
+      // Offline launcher: VITE_DEV_HOST=127.0.0.1 makes the dev server listen on IPv4. On Windows the default
+      // "localhost" is often IPv6 (::1) only, which the launcher's readiness check would not see.
+      host: env.VITE_DEV_HOST || undefined,
       strictPort: true, // backend CORS/dev defaults expect exactly :3000
       proxy: {
         '/api': {
