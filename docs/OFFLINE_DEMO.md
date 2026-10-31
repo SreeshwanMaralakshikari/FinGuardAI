@@ -21,7 +21,7 @@ Your normal setup is not touched. The live site and your `backend/.env` (Atlas) 
 2. Run it and choose **Complete**. Keep **"Install MongoD as a Service"** ticked (the default), so MongoDB starts by itself with Windows.
 3. MongoDB Compass (offered by the installer) is optional. It lets you look at the data.
 
-You also need **Node.js 24** and **Python 3.13**, which you already used for this project.
+You also need **Node.js 24** (version 24.15 or newer) and **Python 3.14** (3.13 also works). On nodejs.org choose **v24.x LTS** in the version list, then the **Windows Installer (.msi)**; never a version labelled Alpha, Current or Nightly.
 
 ### 2. Install the packages (PowerShell, in the project folder)
 
@@ -31,7 +31,7 @@ npm ci
 cd ..\frontend
 npm ci
 cd ..\ml-service
-py -3.13 -m venv .venv
+py -3.14 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 cd ..
 ```

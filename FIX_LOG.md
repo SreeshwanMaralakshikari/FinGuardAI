@@ -3,6 +3,57 @@
 Newest round first. Rounds 2 and 3 (the two audits of the Phase 1–9 code) are documented in `docs/audit/`
 and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTEGRATION.md`.
 
+## New security advisories and npm's install-scripts notice (31 Oct 2026)
+
+Advisories published after the upgrade, all in development and test tools (none ship to the live site):
+- **follow-redirects ≤ 1.16.1** (high): via axios in the frontend and mongodb-memory-server in the backend. Pinned to `^1.16.2` with `overrides`.
+- **minimatch < 11.0.1** (moderate): inside ESLint and test-exclude. Pinned to `^11.0.3` (both apps).
+- **glob 9 – 14.0.1** (moderate): inside Jest. Pinned to `^14.0.3` (backend).
+- Checked first that every user of these packages calls only APIs that did not change. Afterwards ESLint still checks the same files (backend 105, frontend 166) with 0 problems, backend coverage measures the same 44 files with identical numbers, all tests pass (backend 599, frontend 614) and the build works.
+- `npm audit` now: frontend **0**, backend **5 low** (deepmerge inside Jest; no fixed version exists yet; test tool only).
+
+npm 11's notice "3 packages have install scripts not yet covered by allowScripts" (backend only):
+- `@parcel/watcher` (Jest file watcher; builds from source only when no prebuilt binary exists), `unrs-resolver` (Jest; checks its native binary) and `mongodb-memory-server` (downloads a MongoDB binary, which this project never uses, because tests use `MONGO_URI_TEST`).
+- Verified with a clean `npm ci --ignore-scripts`: lint clean and all 599 tests pass with none of the three scripts run.
+- Recorded as denials with `npm deny-scripts` (`allowScripts` in `backend/package.json`). npm 11 stops showing the notice, a future npm that blocks unreviewed scripts will skip them on purpose, and npm 10 ignores the field.
+
+## Everything to the latest version (29 Oct 2026)
+
+Every package in all three parts is on its newest release. Only the restore point `pre-upgrade` (git tag) has the old versions.
+
+| Part | Upgrades | Code changes they needed |
+|---|---|---|
+| Backend | eslint 10, @eslint/js 10, dotenv 18, express 5.3, **express-rate-limit 8.7.2** (security fix for `skipSuccessfulRequests`), mongoose 9.11.4, all others at latest; `test-exclude` overridden to 8.0.0 (same code, current glob), so `npm ci` prints no deprecation warnings | The four per-user rate limiters fall back to the IP through `ipKeyGenerator`: an IPv6 visitor is counted per /56 network, so rotating addresses no longer dodges a limit. `max` → `limit`. New `tests/rateLimiter.test.js`. |
+| Frontend | **recharts 3.10**, eslint 10, jsdom 30, @testing-library/jest-dom 7 (+ its required peer @testing-library/dom), axios 1.21, react 19.3.1, react-hook-form 7.91, react-router-dom 7.18.5, vitest 5.0.5, all others at latest | recharts 3: per-bar colours drawn through the bar `shape` (`Cell` is deprecated); legend **and** tooltip keep the order Transactions → 7-day average → forecast (recharts 3 sorts both alphabetically); `Legend position="top"` (replaces deprecated `verticalAlign`). ESLint 10 tracks JSX itself, so the local `jsx-uses-vars` rule is gone; `npm run lint` now checks the whole frontend. New `tests/charts.test.jsx`. |
+| ML service | numpy 2.5.4, pandas 3.1.0, shap 0.54.1, pytest 9.2.0, ruff 0.17.3; **Python 3.14** is the main version (3.13 still tested) | None. Retraining from seed 42 with the new libraries gives the **byte-identical** model file and identical metrics and rule-floor reports. |
+| CI and runtimes | actions/checkout, setup-node and setup-python v7; ML on Python 3.13 and 3.14. **Node.js 24 everywhere** (decided 31 Oct: Vercel offers no Node 26): CI, Render, Vercel and local machines; `engines` is `^24.15.0` (the test environment jsdom 30 needs 24.15+). The project was also run once on Node 26.12 (599/614 tests, build, API start all pass), so a later switch is safe. | Backend `.node-version` / `.nvmrc` pin 24 on Render. |
+
+Found and fixed during the three error checks (none caused by the upgrade unless noted):
+- Analyst dashboard: the read-only "Latest flagged transactions" table could not be scrolled with the keyboard on narrow layouts (axe `scrollable-region-focusable`, present before the upgrade). New `ScrollRegion` makes it a focusable, labelled region only when it overflows.
+- `public/theme-init.js` had an unused `catch (e)`; it was never linted before (`npm run lint` only covered `src`).
+- `VITE_DEV_HOST` (the launcher setting) was missing from `frontend/.env.example`; a stale "coming" comment on the ACKNOWLEDGED badge.
+
+Checks:
+- **Pass 1, syntax and integrity:** clean installs with no warnings; 165 scripts parse; Python compiles; all 331 tracked files are valid UTF-8 / JSON / YAML with no corruption; 6 images decode; backend lint + 599/599 with coverage on MongoDB 7.0 and 8.0; frontend lint + 614/614 with coverage gates + build; ML 106/106 on Python 3.14 and 3.13; Render-style ML install starts under gunicorn.
+- **Pass 2, semantics and cross-module:**
+  - all 52 frontend API calls match a backend route and method;
+  - the backend, the ML service and the trained model agree on the 15 features, payment methods and maximum amount;
+  - 5,000 fuzzed feature sets from the real backend builder are all accepted by the real ML validator;
+  - enums, badge colours, case workflow and audit types agree between backend and frontend;
+  - environment variables are documented, and no dependency is missing or unused;
+  - production dependencies have 0 known vulnerabilities (npm audit, pip-audit).
+- **Pass 3, runtime:**
+  - fresh install of the full stack (Python 3.14);
+  - real UI journeys in both themes: register → ML-scored takeover → "Was this you?" → analyst opens, assigns and resolves a case → payment BLOCKED → customer notified → thresholds preview, simulation, model insights, user deactivate and reactivate → audit log → theme toggle → sign out;
+  - no page errors, 5xx or axe violations, and no sideways scroll at 375 px;
+  - offline setup, copy, accounts and launcher from a clean install;
+  - API boots on Node 26.
+- Remaining, outside our control: 5 low-severity `deepmerge` advisories inside Jest (test tooling only, no patched version exists).
+
+## CI database version (29 Oct 2026)
+
+GitHub's runners moved to a Linux kernel (6.19+) on which MongoDB 8.0 and newer refuse to start ("MongoDB cannot start: Linux kernel versions 6.19 and newer has a known incompatibility", [MongoDB production notes](https://www.mongodb.com/docs/manual/administration/production-notes/), SERVER-121912). The backend CI job therefore failed before any test ran. The CI service container is now `mongo:7.0`, which is not affected. The full backend suite passes on MongoDB 7.0.34 (592/592) and on 8.0.23. Not affected: the live site (Atlas is managed by MongoDB) and the offline demo (Windows).
+
 ## Offline demo kit (26 Oct 2026)
 
 | Change | Details |

@@ -1,4 +1,12 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+
+/**
+ * Key for limiters that count per signed-in user: the user id, or (before sign-in) the IP address.
+ * express-rate-limit 8: an IP fallback must go through ipKeyGenerator, which groups an IPv6 address by its
+ * /56 network (one customer's whole ISP block), so a client cannot dodge the limit by rotating addresses.
+ * IPv4 addresses are used unchanged.
+ */
+export const userOrIpKey = (req) => (req.user?._id ? `user:${req.user._id}` : ipKeyGenerator(req.ip ?? ''));
 
 /**
  * authLimiter — applied to POST /auth/login.
@@ -9,7 +17,7 @@ import rateLimit from 'express-rate-limit';
  */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  limit: 10,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
@@ -26,7 +34,7 @@ export const authLimiter = rateLimit({
  */
 export const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many registration attempts. Please try again in 1 hour.' },
@@ -40,11 +48,11 @@ export const registerLimiter = rateLimit({
  */
 export const changePasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  limit: 5,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
+  keyGenerator: userOrIpKey,
   message: { success: false, message: 'Too many failed attempts. Please try again in 15 minutes.' },
 });
 
@@ -55,10 +63,10 @@ export const changePasswordLimiter = rateLimit({
  */
 export const profileUpdateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
+  keyGenerator: userOrIpKey,
   message: { success: false, message: 'Too many profile updates. Please try again later.' },
 });
 
@@ -70,10 +78,10 @@ export const profileUpdateLimiter = rateLimit({
  */
 export const transactionLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 30,
+  limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
+  keyGenerator: userOrIpKey,
   message: { success: false, message: 'Transaction rate limit exceeded. Please slow down.' },
 });
 
@@ -84,9 +92,9 @@ export const transactionLimiter = rateLimit({
  */
 export const simulationLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 10,
+  limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => (req.user?._id ? `user:${req.user._id}` : req.ip),
+  keyGenerator: userOrIpKey,
   message: { success: false, message: 'Simulation rate limit exceeded (10 per hour). Please try again later.' },
 });

@@ -12,7 +12,7 @@ const ALERT_STATUS_COLORS = {
   OPEN:      CASE_STATUS_COLORS.OPEN,
   REVIEWED:  CASE_STATUS_COLORS.UNDER_REVIEW,
   DISMISSED: CASE_STATUS_COLORS.DISMISSED,
-  // B-04: ACKNOWLEDGED (coming: a MEDIUM alert seen by the customer / analyst) — neutral grey-blue
+  // B-04: ACKNOWLEDGED (a MEDIUM alert the customer has seen) — neutral grey-blue
   ACKNOWLEDGED: Object.freeze({ text: 'text-slate-700', bg: 'bg-slate-100', border: 'border-slate-300' }),
 };
 

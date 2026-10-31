@@ -71,7 +71,7 @@ foreach ($folder in @($backend, $frontend)) {
 }
 $python = Join-Path $ml '.venv\Scripts\python.exe'
 if (-not (Test-Path $python)) {
-  Stop-WithMessage "ml-service\.venv is missing. Run once (with internet):`n  cd ml-service`n  py -3.13 -m venv .venv`n  .venv\Scripts\python.exe -m pip install -r requirements.txt"
+  Stop-WithMessage "ml-service\.venv is missing. Run once (with internet):`n  cd ml-service`n  py -3.14 -m venv .venv`n  .venv\Scripts\python.exe -m pip install -r requirements.txt"
 }
 $keyLine = Get-Content $envFile | Where-Object { $_ -match '^ML_API_KEY=' } | Select-Object -First 1
 if (-not $keyLine) { Stop-WithMessage 'ML_API_KEY is missing from backend\.env.offline. Run: cd backend; npm run offline:setup -- --force' }

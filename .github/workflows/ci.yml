@@ -1,7 +1,8 @@
 # FinGuardAI continuous integration: every push and pull request runs the three test suites.
-#   backend     — ESLint + 570+ Jest tests against a throw-away MongoDB 8 container
-#   frontend    — ESLint + Vitest (with the coverage gates) + a production build
-#   ml-service  — ruff + 106 pytest tests against the committed model (model/ is in git)
+#   backend     — ESLint + ~600 Jest tests against a throw-away MongoDB 7.0 container      (Node 24)
+#   frontend    — ESLint + Vitest (with the coverage gates) + a production build             (Node 24)
+#   ml-service  — ruff + 106 pytest tests against the committed model (model/ is in git)     (Python 3.13 and 3.14)
+# Node 24 is what Render and Vercel run, so CI uses exactly that (the newest 24.x release).
 # No secrets are needed: tests use their own JWT secret, a disposable database and fake ML keys.
 name: CI
 
@@ -19,12 +20,15 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (Node 24, MongoDB 8)
+    name: Backend (Node 24, MongoDB 7.0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       mongo:
-        image: mongo:8
+        # MongoDB 7.0, not 8.x: MongoDB 8.0+ refuses to start on Linux kernel 6.19-7.0.13 (its TCMalloc is
+        # incompatible; see MongoDB's production notes and SERVER-121912), which GitHub's runners now use.
+        # The app needs nothing 8.0-only; the full backend suite passes on 7.0.34 and on 8.0.23.
+        image: mongo:7.0
         ports: ['27017:27017']
         options: >-
           --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
@@ -36,8 +40,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -47,15 +51,15 @@ jobs:
       - run: npm run test:coverage
 
   frontend:
-    name: Frontend (lint, tests, build)
+    name: Frontend (Node 24, lint, tests, build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -70,19 +74,23 @@ jobs:
           VITE_API_URL: https://finguardai-api.example.com
 
   ml-service:
-    name: ML service (Python 3.13)
+    name: ML service (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.13', '3.14']
     defaults:
       run:
         working-directory: ml-service
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.13'
+          python-version: ${{ matrix.python }}
           cache: pip
           cache-dependency-path: ml-service/requirements*.txt
-      - run: pip install -r requirements-train.txt ruff==0.16.8
+      - run: pip install -r requirements-train.txt ruff==0.17.3
       - run: ruff check .
       - run: python -m pytest -q

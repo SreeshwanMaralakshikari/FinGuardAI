@@ -12,6 +12,10 @@ import { CARD } from '../../utils/common.js';
 import { useChartColors, tooltipStyles } from '../../hooks/useChartColors.js';
 
 export const FORECAST_NAME = 'Forecast (next 7 days, linear trend)';
+// recharts 3 sorts legend AND tooltip items alphabetically by default; keep the reading order of the lines instead.
+const SERIES_ORDER = ['Transactions', '7-day average', FORECAST_NAME];
+const legendOrder = (item) => SERIES_ORDER.indexOf(item.value);
+const tooltipOrder = (item) => SERIES_ORDER.indexOf(item.name);
 const FORECAST_NOTE = 'No forecast yet: it needs at least 7 days with high-risk transactions in the last 14 days.';
 
 export default function TrendChart({ data, forecast = null, height = 300 }) {
@@ -40,8 +44,8 @@ export default function TrendChart({ data, forecast = null, height = 300 }) {
                 <CartesianGrid stroke={c.grid} strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="date" tick={{ fontSize: 11, fill: c.tick }} tickLine={false} axisLine={{ stroke: c.axis }} tickFormatter={(d) => d.slice(5)} minTickGap={24} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: c.tick }} tickLine={false} axisLine={false} />
-                <Tooltip {...tooltipStyles(c)} />
-                <Legend verticalAlign="top" height={28} iconType="plainline" />
+                <Tooltip {...tooltipStyles(c)} itemSorter={tooltipOrder} />
+                <Legend position="top" height={28} iconType="plainline" itemSorter={legendOrder} />
                 <Line type="monotone" dataKey="count" name="Transactions" stroke={c.brand} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                 <Line type="monotone" dataKey="movingAvg" name="7-day average" stroke={c.average} strokeWidth={2} strokeDasharray="6 4" dot={false} />
                 {hasForecast && (

@@ -183,11 +183,11 @@ judged worth the small drop. `tests/test_model.py` checks the constraints hold.
 
 ## Run it locally (Windows, PowerShell)
 
-Python 3.13 is the tested version.
+Python 3.14 is the main version; 3.13 is tested too (CI runs both).
 
 ```powershell
 cd ml-service
-py -3.13 -m venv .venv
+py -3.14 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements-train.txt
 
@@ -231,7 +231,7 @@ Invoke-RestMethod -Uri http://127.0.0.1:5001/predict -Method Post -ContentType "
    * **Health Check Path:** `/health`
 4. Environment variables:
    * `ML_API_KEY` = a new random 64-character hex string (the backend gets the same value)
-   * `PYTHON_VERSION` = `3.13.16` (Render's default for new services is 3.14)
+   * `PYTHON_VERSION` = `3.14.6` (the version CI and the offline setup use; 3.13 also works)
 5. Deploy, then open `https://<your-ml-service>.onrender.com/health` — it should show
    `{"status": "ok", "modelVersion": "fg-xgb-1.1.0"}`.
 

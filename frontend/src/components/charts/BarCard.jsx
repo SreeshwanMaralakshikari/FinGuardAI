@@ -6,15 +6,18 @@
  *   field with the long form of the x label (A-01: a device id + its account count): the chart tooltip and the
  *   "View as table" rows show it, the axis shows the short `xKey` text. `colors` (optional) colours bars per datum for ordered
  *   categories (risk levels); otherwise the brand colour is used. `colors` values may be keys of
- *   useChartColors (e.g. 'LOW'), resolved for the active theme.
+ *   useChartColors (e.g. 'LOW'), resolved for the active theme. Per-bar colours are drawn through the bar's `shape`
+ *   (recharts 3 deprecated `Cell`, which is removed in recharts 4).
  */
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Rectangle, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CARD } from '../../utils/common.js';
 import { useChartColors, tooltipStyles } from '../../hooks/useChartColors.js';
 
 export default function BarCard({ title, subtitle, data, xKey, xLabel = null, yKey = 'count', yLabel = 'Count', colors = null, fullKey = null, height = 240 }) {
   const empty = !data || data.every((d) => !d[yKey]);
   const c = useChartColors(); // R4-01: theme-aware colours
+  const colorFor = (d) => c[colors?.[d?.[xKey]]] ?? colors?.[d?.[xKey]] ?? c.brand;
+  const barShape = (props) => <Rectangle {...props} fill={colorFor(props.payload)} />;
   return (
     <section className={`${CARD.base} p-5`} aria-label={title}>
       <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
@@ -35,9 +38,7 @@ export default function BarCard({ title, subtitle, data, xKey, xLabel = null, yK
                   formatter={(v) => [v, yLabel]}
                   labelFormatter={(label, payload) => (fullKey ? payload?.[0]?.payload?.[fullKey] : null) ?? label}
                 />
-                <Bar dataKey={yKey} radius={[4, 4, 0, 0]} maxBarSize={36}>
-                  {data.map((d, i) => <Cell key={`${String(d[xKey])}-${i}`} fill={c[colors?.[d[xKey]]] ?? colors?.[d[xKey]] ?? c.brand} />)}
-                </Bar>
+                <Bar dataKey={yKey} radius={[4, 4, 0, 0]} maxBarSize={36} fill={c.brand} shape={barShape} />
               </BarChart>
             </ResponsiveContainer>
           </div>

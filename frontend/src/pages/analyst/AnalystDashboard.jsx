@@ -20,6 +20,7 @@ import StatCard from '../../components/common/StatCard.jsx';
 import EmptyState from '../../components/common/EmptyState.jsx';
 import LoadError from '../../components/common/LoadError.jsx';
 import { RiskBadge, CaseStatusBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
+import ScrollRegion from '../../components/common/ScrollRegion.jsx';
 
 const countOf = async (params, signal) =>
   (await api.get(API_PATHS.ANALYST.CASES, { params: { ...params, limit: 1 }, signal })).data.pagination.total;
@@ -100,7 +101,7 @@ export default function AnalystDashboard() {
           ) : flaggedRows.length === 0 ? (
             <EmptyState title={flagged.loading ? 'Loading…' : 'Nothing flagged'} />
           ) : (
-            <div className={TABLE.wrapper}>
+            <ScrollRegion label="Latest flagged transactions (scrolls sideways)">
               <table className={TABLE.table}>
                 <thead className={TABLE.thead}>
                   <tr><th className={TABLE.th}>Customer</th><th className={TABLE.th}>Amount</th><th className={TABLE.th}>Risk</th><th className={TABLE.th}>Status</th><th className={TABLE.th}>Date</th></tr>
@@ -117,7 +118,7 @@ export default function AnalystDashboard() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollRegion>
           )}
         </section>
       </div>

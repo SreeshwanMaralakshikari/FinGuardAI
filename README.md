@@ -78,7 +78,7 @@ The data is simulated in FinGuardAI's own format, because public fraud datasets 
 
 ```
 backend/      Express 5 API, MongoDB (Mongoose 9), Socket.io, rule engine, ML client      → Render
-frontend/     React 19 + Vite 8 + Tailwind 4 + Redux Toolkit                             → Vercel
+frontend/     React 19 + Vite 8 + Tailwind 4 + Redux Toolkit + Recharts 3                 → Vercel
 ml-service/   Flask + XGBoost + TreeSHAP, synthetic data generator, training, evaluation → Render
 docs/         Architecture, Phase 10 (ML) notes, audits, screenshots
 FIX_LOG.md    What each review round fixed
@@ -88,7 +88,7 @@ start-offline.cmd   Starts everything locally for an offline demo (docs/OFFLINE_
 
 ## Run it locally
 
-You need Node.js 24, Python 3.13 and a MongoDB database (MongoDB Atlas free tier works).
+You need Node.js 24 (version 24.15 or newer, the same major version as the live site), Python 3.14 (3.13 also works) and a MongoDB database (MongoDB Atlas free tier works).
 
 Commands are for Windows PowerShell; on macOS / Linux use `cp` and `source .venv/bin/activate`.
 
@@ -107,7 +107,7 @@ npm run dev                   # forwards /api to the backend
 
 # 3. ML service (optional, http://localhost:5001), in a third terminal
 cd ml-service
-py -3.13 -m venv .venv
+py -3.14 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 $env:ML_API_KEY = python -c "import secrets; print(secrets.token_hex(32))"
@@ -138,13 +138,13 @@ The whole app (MongoDB, API, ML model and website) can run on one Windows laptop
 
 | Part | Command | Tests |
 |---|---|---|
-| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 590 |
-| Frontend | `cd frontend && npm test` | 607 (+ coverage gates with `npm run test:coverage`) |
+| Backend | `cd backend && npm test` (set `MONGO_URI_TEST` to a separate database such as `…/finguardai_test`) | 599 |
+| Frontend | `cd frontend && npm test` | 614 (+ coverage gates with `npm run test:coverage`) |
 | ML service | `cd ml-service && pip install -r requirements-train.txt && python -m pytest -q` | 106 |
 
 Lint: `npm run lint` in `backend` and `frontend`, `ruff check .` in `ml-service`.
 
-**Continuous integration.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all of the above on GitHub Actions for every push and pull request: three parallel jobs, a throw-away MongoDB 8 container for the backend, and no secrets. Results are on the repository's *Actions* tab.
+**Continuous integration.** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs all of the above on GitHub Actions for every push and pull request, with no secrets: backend and frontend on Node.js 24 (as on Render and Vercel), the ML service on Python 3.13 and 3.14, and a throw-away MongoDB 7.0 container for the backend (7.0 because MongoDB 8.x cannot start on the newer Linux kernel of GitHub's machines). Results are on the repository's *Actions* tab.
 
 ## Deployment
 
@@ -152,7 +152,7 @@ Lint: `npm run lint` in `backend` and `frontend`, `ruff check .` in `ml-service`
 |---|---|---|
 | Frontend | Vercel | Root `frontend`; `VITE_API_URL=https://<api>.onrender.com` |
 | API | Render (web service) | Root `backend`; start `npm start`; variables from `backend/.env.example` (production: `NODE_ENV=production`) |
-| ML service | Render (web service) | Root `ml-service`; build `pip install -r requirements.txt`; start `gunicorn -c gunicorn.conf.py wsgi:app`; `ML_API_KEY`, `PYTHON_VERSION=3.13.16` |
+| ML service | Render (web service) | Root `ml-service`; build `pip install -r requirements.txt`; start `gunicorn -c gunicorn.conf.py wsgi:app`; `ML_API_KEY`, `PYTHON_VERSION=3.14.6` |
 
 After a release that adds indexes, run `npm run db:sync-indexes` once against the production database.
 

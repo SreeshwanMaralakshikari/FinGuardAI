@@ -1,4 +1,4 @@
-// eslint.config.js — ESLint 9 flat config for the backend (T-06). `npm run lint` must report zero errors.
+// eslint.config.js — ESLint 10 flat config for the backend (T-06). `npm run lint` must report zero errors.
 import js from '@eslint/js';
 import globals from 'globals';
 

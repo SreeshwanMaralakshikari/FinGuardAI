@@ -94,6 +94,6 @@ wake gate, so they appear instantly even while the Render API is asleep. Every o
 
 ## Continuous integration
 
-`.github/workflows/ci.yml` runs on every push and pull request, with three parallel jobs and no secrets:
-backend (ESLint, Jest with coverage, against a throw-away `mongo:8` service container), frontend (ESLint, Vitest with
+`.github/workflows/ci.yml` runs on every push and pull request, with no secrets. Backend and frontend run on Node.js 24 (as on Render and Vercel), the ML service on Python 3.13 and 3.14:
+backend (ESLint, Jest with coverage, against a throw-away `mongo:7.0` service container; MongoDB 8.x cannot start on GitHub's newer Linux kernel), frontend (ESLint, Vitest with
 the coverage gates, production build) and ml-service (ruff, pytest against the committed model).
