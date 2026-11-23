@@ -3,6 +3,31 @@
 Newest round first. Rounds 2 and 3 (the two audits of the Phase 1–9 code) are documented in `docs/audit/`
 and in the round reports; Phase 10 itself is described in `docs/PHASE_10_ML_INTEGRATION.md`.
 
+## TEJAS D1, step 1: payees and the payee watchlist (14 Nov 2026)
+
+Who receives the money, so that mule accounts (one payee collecting from many victims) become visible. **Shadow mode:**
+the new payee signals are stored and shown to analysts, but they do not change any fraud score yet (step 2 adds them to
+the rule engine and the ML model, and retrains it).
+
+- **Payee on every new payment.** Optional `payeeVpa` (UPI ID, `name@bank`) on `POST /customer-api/transactions`;
+  without it the merchant is the payee. Stored as `payee { key, vpa? }`; keys are `vpa:<upi id>` or
+  `merchant:<name>`, compared case- and space-insensitively (`utils/payee.js`). A malformed UPI ID is a 422.
+- **Payee signals at payment time** (`payeeSignals`, earlier payments only): first payment of this customer to the
+  payee, days since anyone first paid it, distinct customers who paid it in 24 h, ₹ received in 24 h, on the
+  watchlist. The customer's response shows only `firstTimePayee` and `watchlisted` (other customers' activity stays
+  with analysts). A failing lookup leaves the signals out instead of failing the payment.
+- **Payee watchlist** (`PayeeWatchlist`, a shared negative registry): `GET/POST /analyst-api/payees/watchlist`,
+  `DELETE /analyst-api/payees/watchlist/:id` (soft removal, history kept; adding again reactivates). Fraud confirmed
+  (case RESOLVED) adds the payment's **UPI ID** payee automatically with the case as evidence; merchant payees are
+  never added automatically. Audited: `PAYEE_WATCHLISTED`, `PAYEE_UNWATCHLISTED`.
+- **Payee profile** `GET /analyst-api/payees/profile?key=…`: totals, last 24 h, distinct senders, risk mix, recent
+  payments, watchlist status. Audited as `PAYEE_VIEWED` (it reads other customers' payments).
+- The flagged-transactions list returns `payee` and `payeeSignals`.
+- **One-time backfill** for existing databases: `npm run db:backfill-payees` (or `:offline`) gives older payments
+  their merchant payee; run `npm run db:sync-indexes` first for the two new indexes. Idempotent.
+- Tests: `tests/tejas.payee.units.test.js` (52, no database) and `tests/tejas.payee.api.test.js` (database);
+  the two response-shape tests now include `payee` and `payeeSignals`.
+
 ## New security advisories and npm's install-scripts notice (31 Oct 2026)
 
 Advisories published after the upgrade, all in development and test tools (none ship to the live site):

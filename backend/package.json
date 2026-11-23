@@ -11,6 +11,8 @@
     "dev": "node --watch server.js",
     "seed:admin": "node seed/seedAdmin.js",
     "db:sync-indexes": "node seed/syncIndexes.js",
+    "db:backfill-payees": "node seed/backfillPayees.js",
+    "db:backfill-payees:offline": "node --env-file=.env.offline seed/backfillPayees.js",
     "lint": "eslint .",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --coverage",

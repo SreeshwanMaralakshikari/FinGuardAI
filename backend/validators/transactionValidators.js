@@ -1,5 +1,9 @@
 import { body, header, param } from 'express-validator';
 import { PAYMENT_METHODS, CUSTOMER_RESPONSES } from '../utils/enums.js';
+import { VPA_PATTERN, VPA_MAX_LENGTH, normalizeVpa } from '../utils/payee.js';
+
+/** TEJAS D1: one message for every malformed UPI ID. */
+export const VPA_MESSAGE = 'Payee UPI ID must look like name@bank (letters, digits, ".", "-" or "_" before the @)';
 
 /** C-01: format of the optional Idempotency-Key request header. */
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,100}$/;
@@ -61,6 +65,14 @@ export const submitTransactionRules = [
     .trim()
     .notEmpty().withMessage('Location country cannot be an empty string')
     .isLength({ max: 100 }).withMessage('Location country cannot exceed 100 characters'),
+
+  // TEJAS D1: optional UPI ID of the payee. Empty / null / absent = no UPI ID (the merchant name identifies the payee).
+  body('payeeVpa')
+    .optional({ values: 'falsy' })
+    .isString().withMessage(VPA_MESSAGE).bail()
+    .isLength({ max: VPA_MAX_LENGTH }).withMessage(VPA_MESSAGE).bail()
+    .customSanitizer(normalizeVpa)
+    .matches(VPA_PATTERN).withMessage(VPA_MESSAGE),
 
   body('deviceId')
     .isString().withMessage('Device ID must be a string').bail()

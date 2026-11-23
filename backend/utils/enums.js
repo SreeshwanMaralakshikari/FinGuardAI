@@ -46,8 +46,11 @@ export const AUDIT_ACTIONS = Object.freeze([
   'TRANSACTION_VIEWED', 'DEVICE_VIEWED',
   'ALERT_ACKNOWLEDGED', 'SIMULATION_DATA_GENERATED', 'SIMULATION_DATA_CLEARED',
   'CUSTOMER_RESPONDED',
+  'PAYEE_WATCHLISTED', 'PAYEE_UNWATCHLISTED', 'PAYEE_VIEWED',
 ]);
 /** R4: the customer's answer to "Was this you?" on a held / blocked payment. */
 export const CUSTOMER_RESPONSES = Object.freeze(['CONFIRMED', 'DISPUTED']);
 /** In-app notification types (NotificationModel.type). R4 adds CUSTOMER_RESPONSE for analysts. */
 export const NOTIFICATION_TYPES = Object.freeze(['FRAUD_ALERT', 'CASE_ASSIGNED', 'CASE_STATUS_CHANGED', 'CUSTOMER_RESPONSE']);
+/** TEJAS D1: how a payee got onto the watchlist (models/PayeeWatchlistModel.js). */
+export const WATCHLIST_SOURCES = Object.freeze(['CONFIRMED_FRAUD', 'ANALYST_REPORT']);

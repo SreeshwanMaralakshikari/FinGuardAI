@@ -21,6 +21,7 @@ import DeviceReputationModel from '../models/DeviceReputationModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
 import FraudCaseModel from '../models/FraudCaseModel.js';
 import NotificationModel from '../models/NotificationModel.js';
+import PayeeWatchlistModel from '../models/PayeeWatchlistModel.js';
 import SystemConfigModel from '../models/SystemConfigModel.js';
 import TransactionModel from '../models/TransactionModel.js';
 import UserModel from '../models/UserModel.js';
@@ -28,6 +29,7 @@ import UserModel from '../models/UserModel.js';
 export const ALL_MODELS = Object.freeze([
   UserModel, TransactionModel, FraudAlertModel, FraudCaseModel, NotificationModel,
   AuditLogModel, DeviceReputationModel, BehaviorProfileModel, SystemConfigModel,
+  PayeeWatchlistModel, // TEJAS D1
 ]);
 
 /** Throws when the connection string is missing, blank or still a template. @returns {string[]} warnings */

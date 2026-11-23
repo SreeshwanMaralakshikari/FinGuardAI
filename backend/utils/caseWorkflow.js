@@ -19,6 +19,8 @@
  *                 eligible to train the behaviour profile (B-03); the profile is rebuilt. The customer's
  *                 trust score and the device reputation are recalculated, so
  *                 "lossPrevented" (HELD/BLOCKED only) stops counting it.
+ *   TEJAS D1: RESOLVED also puts the payment's payee on the payee watchlist when the payee was a UPI ID
+ *   (services/payeeService.watchlistFromConfirmedFraud; best effort, audited as PAYEE_WATCHLISTED).
  *   The alert stays OPEN while its case is open (B-04): it becomes REVIEWED / DISMISSED only here.
  *   The customer receives an in-app notification about the outcome.
  *
@@ -41,6 +43,7 @@ import updateTrustScore from './updateTrustScore.js';
 import updateDeviceReputation from './updateDeviceReputation.js';
 import { formatRupees } from './normalize.js';
 import { withUserLock } from './userLock.js';
+import { watchlistFromConfirmedFraud } from '../services/payeeService.js';
 
 export const CLOSED_STATUSES = Object.freeze(['RESOLVED', 'DISMISSED']);
 
@@ -184,6 +187,16 @@ export const applyCaseOutcome = async ({ fraudCase, status, analyst, ip = '' }) 
         // B-03: the released transaction is trusted now — rebuild the baseline.
         if (released) await bestEffort('behaviour profile rebuild', () => calcBehaviorProfile(transactionBefore.userId));
       }));
+  }
+
+  // TEJAS D1: fraud confirmed → the UPI ID that received the money goes on the payee watchlist.
+  // Never throws (watchlistFromConfirmedFraud swallows its own errors); the audit entry only when something changed.
+  if (!dismissed && transactionBefore) {
+    const listed = await watchlistFromConfirmedFraud({ transaction: transactionBefore, fraudCase, analyst });
+    if (listed && (listed.created || listed.reactivated)) {
+      await createAuditLog(analyst._id, 'ANALYST', 'PAYEE_WATCHLISTED', 'PayeeWatchlist', String(listed.entry.id),
+        { payeeKey: listed.entry.key, source: 'CONFIRMED_FRAUD', caseId: fraudCase.publicId }, ip);
+    }
   }
 
   // Tell the customer how it ended (in-app notification, existing mechanism).

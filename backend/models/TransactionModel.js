@@ -64,6 +64,28 @@ const customerResponseSchema = new Schema(
   { _id: false }
 );
 
+// TEJAS D1: who receives the money (utils/payee.js buildPayee). `vpa` only when the customer entered a UPI ID.
+const payeeSchema = new Schema(
+  {
+    key: { type: String, required: true, trim: true, maxlength: 220 },
+    vpa: { type: String, trim: true, maxlength: 100 },
+  },
+  { _id: false }
+);
+
+// TEJAS D1: what the system knew about the payee at the moment of payment (services/payeeService.js), counted over
+// EARLIER payments only. Stored with the payment so an analyst later sees the picture the scoring saw.
+const payeeSignalsSchema = new Schema(
+  {
+    firstTimePayee:  { type: Boolean, required: true },           // this customer never paid this payee before
+    payeeAgeDays:    { type: Number, min: 0, required: true },    // days since anyone first paid this payee (0 = new)
+    sendersLast24h:  { type: Number, min: 0, required: true },    // distinct customers who paid this payee in 24 h
+    inflowLast24h:   { type: Number, min: 0, required: true },    // ₹ sent to this payee in 24 h (all outcomes)
+    watchlisted:     { type: Boolean, required: true },           // on the active payee watchlist
+  },
+  { _id: false }
+);
+
 const transactionSchema = new Schema(
   {
     publicId: {
@@ -100,6 +122,13 @@ const transactionSchema = new Schema(
         message: 'Payment method must be UPI, CARD, NET_BANKING, or WALLET',
       },
       required: [true, 'Payment method is required'],
+    },
+    // TEJAS D1: absent on payments made before D1 (the UI then shows the merchant name as the payee).
+    payee: {
+      type: payeeSchema,
+    },
+    payeeSignals: {
+      type: payeeSignalsSchema,
     },
     location: {
       type: locationSchema,
@@ -203,6 +232,9 @@ transactionSchema.index({ deviceId: 1 });
 transactionSchema.index({ riskLevel: 1, timestamp: -1 });
 // C-08: "which devices has this user used" (distinct device count + known-device check) is served by this index.
 transactionSchema.index({ userId: 1, deviceId: 1 });
+// TEJAS D1: payee history (first payment, distinct senders and inflow in 24 h) and "has this customer paid this payee".
+transactionSchema.index({ 'payee.key': 1, timestamp: -1 });
+transactionSchema.index({ userId: 1, 'payee.key': 1 });
 // A-08: counting / clearing simulated data; sparse = only the (few) simulated documents are indexed.
 transactionSchema.index({ isSimulated: 1 }, { sparse: true });
 

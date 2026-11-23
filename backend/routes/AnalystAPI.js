@@ -22,6 +22,13 @@ import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
 import FraudCaseModel from '../models/FraudCaseModel.js';
 import DeviceReputationModel from '../models/DeviceReputationModel.js';
+import { buildPayee } from '../utils/payee.js';
+import {
+  addWatchlistRules, removeWatchlistRules, listWatchlistRules, payeeProfileRules,
+} from '../validators/payeeValidators.js';
+import {
+  addToWatchlist, removeFromWatchlist, listWatchlist, getPayeeProfile,
+} from '../services/payeeService.js';
 
 const router = express.Router();
 
@@ -83,7 +90,7 @@ router.get(
         .skip(skip)
         .limit(Number(limit))
         .populate('userId', 'name email trustScore')
-        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore reasons recommendedAction status timestamp deviceId ipAddress customerResponse'),
+        .select('publicId amount merchantName merchantCategory paymentMethod riskLevel fraudScore reasons recommendedAction status timestamp deviceId ipAddress customerResponse payee payeeSignals'),
       TransactionModel.countDocuments(filter),
     ]);
 
@@ -575,6 +582,81 @@ router.get(
       success: true,
       data: { sharedIpClusters, sharedDeviceClusters, highRiskMerchantClusters },
     });
+  })
+);
+
+// ══ TEJAS D1: payees ═══════════════════════════════════════════════════════════════════════════════════════════
+
+const WATCHLIST_STATUS_FILTER = Object.freeze({ active: true, removed: false, all: undefined });
+
+// ── GET /analyst-api/payees/watchlist?status=active|removed|all&page&limit ────────────────────────────────────
+router.get(
+  '/payees/watchlist',
+  listWatchlistRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { page, limit, skip } = parsePagination(req.query, 20);
+    const active = WATCHLIST_STATUS_FILTER[req.query.status || 'active'];
+    const { entries, total } = await listWatchlist({ active, skip, limit });
+    res.status(200).json({ success: true, data: entries, pagination: buildPagination(page, limit, total) });
+  })
+);
+
+// ── POST /analyst-api/payees/watchlist { vpa | merchantName, note? } ─────────────────────────────────────────
+router.post(
+  '/payees/watchlist',
+  addWatchlistRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { vpa, merchantName, note = '' } = req.body;
+    const payee = buildPayee({ payeeVpa: vpa, merchantName });
+    const { entry, created, reactivated } = await addToWatchlist({
+      key: payee.key,
+      vpa: payee.vpa,
+      label: payee.vpa ?? merchantName,
+      source: 'ANALYST_REPORT',
+      note,
+      actorId: req.user._id,
+    });
+    if (created || reactivated) {
+      await createAuditLog(req.user._id, 'ANALYST', 'PAYEE_WATCHLISTED', 'PayeeWatchlist', String(entry.id),
+        { payeeKey: entry.key, source: 'ANALYST_REPORT', reactivated }, req.ip);
+    }
+    res.status(created ? 201 : 200).json({
+      success: true,
+      message: created || reactivated ? 'Payee added to the watchlist.' : 'This payee is already on the watchlist.',
+      data: entry,
+    });
+  })
+);
+
+// ── DELETE /analyst-api/payees/watchlist/:id { note? } — soft removal ────────────────────────────────────────
+router.delete(
+  '/payees/watchlist/:id',
+  removeWatchlistRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const entry = await removeFromWatchlist({ id: req.params.id, actorId: req.user._id, note: req.body.note ?? '' });
+    if (!entry) {
+      return res.status(404).json({ success: false, message: 'No active watchlist entry with this id.' });
+    }
+    await createAuditLog(req.user._id, 'ANALYST', 'PAYEE_UNWATCHLISTED', 'PayeeWatchlist', String(entry.id),
+      { payeeKey: entry.key }, req.ip);
+    res.status(200).json({ success: true, message: 'Payee removed from the watchlist.', data: entry });
+  })
+);
+
+// ── GET /analyst-api/payees/profile?key=vpa:ravi@okaxis ─────────────────────────────────────────────────────
+router.get(
+  '/payees/profile',
+  payeeProfileRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const profile = await getPayeeProfile(req.query.key);
+    if (!profile) return res.status(404).json({ success: false, message: 'No payments to this payee were found.' });
+    // Reading who paid a payee is a read of other customers' data: audited like TRANSACTION_VIEWED.
+    await createAuditLog(req.user._id, 'ANALYST', 'PAYEE_VIEWED', 'Payee', profile.key, {}, req.ip);
+    res.status(200).json({ success: true, data: profile });
   })
 );
 

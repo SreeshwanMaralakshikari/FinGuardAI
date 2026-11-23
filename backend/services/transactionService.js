@@ -30,6 +30,8 @@ import { formatRupees } from '../utils/normalize.js';
 import { getIO } from '../utils/socketManager.js';
 import { ALERT_RISK_LEVELS } from '../utils/enums.js';
 import { isDeviceCapReached } from '../utils/deviceCap.js';
+import { buildPayee } from '../utils/payee.js';
+import { computePayeeSignals, customerPayeeView, plainPayee } from './payeeService.js';
 import TransactionModel from '../models/TransactionModel.js';
 import FraudAlertModel from '../models/FraudAlertModel.js';
 import BehaviorProfileModel from '../models/BehaviorProfileModel.js';
@@ -135,6 +137,8 @@ export const buildTransactionResponse = (txn, alert) => ({
   timestamp: txn.timestamp,
   scoreBreakdown: plainBreakdown(txn.scoreBreakdown), // B-01
   scoring: plainScoring(txn.scoring),                 // Phase 10
+  payee: plainPayee(txn.payee),                       // TEJAS D1 (null before D1)
+  payeeSignals: customerPayeeView(txn.payeeSignals),  // TEJAS D1: the customer's own view only
 });
 
 /** C-01: the transaction this user already stored under `idempotencyKey`, with its alert. */
@@ -188,7 +192,7 @@ const findReplay = async (userId, idempotencyKey) => {
  * @param {object} args
  * @param {{ _id: any }} args.user   the paying customer (req.user)
  * @param {object} args.payload      { amount, merchantName, merchantCategory?, paymentMethod, deviceId,
- *                                     location, idempotencyKey? } — already validated / sanitised
+ *                                     location, payeeVpa?, idempotencyKey? } — already validated / sanitised
  * @param {{ ip?: string, simulated?: boolean }} [args.context]  request context (client ip for the audit trail;
  *                                   `simulated` is set ONLY by the admin simulation generator, never from a request, A-08)
  * @returns {Promise<{ transaction: object, alert: object|null, fraud: object, replayed: boolean }>}
@@ -199,6 +203,7 @@ const findReplay = async (userId, idempotencyKey) => {
 export const processTransaction = async ({ user, payload, context = {} }) => {
   const { amount, merchantName, merchantCategory, paymentMethod, deviceId, idempotencyKey } = payload;
   const location = pickLocation(payload.location);
+  const payee = buildPayee({ payeeVpa: payload.payeeVpa, merchantName }); // TEJAS D1
   const userId = user._id;
   const ip = context.ip;
   const simulated = context.simulated === true; // A-08
@@ -236,6 +241,12 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
     // C-08: an unknown device id of a user who already used the maximum number of devices is scored as usual
     // (it is "unrecognised" to the behaviour profile) but never gets a DeviceReputation document.
     const deviceCapped = await bestEffort('device cap check', () => isDeviceCapReached(userId, deviceId, Boolean(deviceReputation)));
+    // TEJAS D1 (step 1, shadow mode): payee signals are stored with the payment and shown to analysts; they do not
+    // change the score yet. Best effort: a failing lookup leaves them out instead of failing the payment.
+    const payeeSignals = await computePayeeSignals({ userId, payeeKey: payee.key, now }).catch((err) => {
+      console.error('[transactionService] payee signals lookup failed; the payment is scored without them:', err.message);
+      return null;
+    });
     const profileForCheck = {
       ...(behaviorProfile ?? {}),
       transactionVelocity: { perHour: txnsLastHour, perDay: txnsLastDay },
@@ -281,6 +292,8 @@ export const processTransaction = async ({ user, payload, context = {} }) => {
         merchantCategory: merchantCategory ?? 'GENERAL',
         paymentMethod,
         location,
+        payee,                      // TEJAS D1
+        ...(payeeSignals ? { payeeSignals } : {}),
         deviceId,
         ipAddress: ip,
         fraudScore,
