@@ -28,6 +28,28 @@ the rule engine and the ML model, and retrains it).
 - Tests: `tests/tejas.payee.units.test.js` (52, no database) and `tests/tejas.payee.api.test.js` (database);
   the two response-shape tests now include `payee` and `payeeSignals`.
 
+**Frontend (zip 2):**
+- *Submit transaction*: optional **Payee UPI ID** field, validated with the same rules as the API
+  (`src/utils/payee.js`, pinned to the backend's examples by a test). The result shows "Paid to" and warns the
+  customer when the payee is on the watchlist, or notes a first payment to a UPI ID (`PayeeNotice`). Every example
+  payment now sets the UPI ID, and a new example "Unknown UPI ID" shows the mule pattern.
+- Analysts: a **payee panel** on the flagged-transaction investigation and the case page (who received the money,
+  watchlist status, "paid by N customers in 24 h", first payment, new payee; linked to the profile); a **Payees**
+  page (look up a UPI ID or merchant, `?key=` deep links); a **Payee Watchlist** page (add, filter, remove with a
+  reason). Flagged CSV export has a Payee column.
+- Checked in a real browser (production build, mocked API): 24 screens in both themes at 1280 px and 375 px with no
+  axe WCAG 2.1 A/AA violations, no horizontal page overflow and no console errors. That run found two problems,
+  fixed: the payee profile's payments table was not keyboard-scrollable on phones (now a `ScrollRegion`), and the
+  watchlist table pushed the Remove button off a 1280 px screen.
+- Tests: `src/__tests__/tejas.payee.test.jsx` (40); the CSV header test includes the Payee column.
+
+**Flaky chart test fixed (23 Nov):** the three `BarCard` tests in `src/__tests__/charts.test.jsx` failed now and then on
+the Windows laptop (and once in the Claude workspace). Recharts animates bars in unless the user prefers reduced motion;
+jsdom has no `matchMedia`, so the bars only appeared after the animation frames, about 2 s per test here and about 5 s
+on the laptop, right at the 5 s wait. The test now reports "prefers reduced motion" (`vi.stubGlobal('matchMedia', …)`),
+so the final bars are drawn at once, as for a reduced-motion user in a real browser: about 0.08 s per test. Test change
+only, no app change. Checked: 654/654 twice with `--coverage` while all CPU cores were kept busy.
+
 ## New security advisories and npm's install-scripts notice (31 Oct 2026)
 
 Advisories published after the upgrade, all in development and test tools (none ship to the live site):

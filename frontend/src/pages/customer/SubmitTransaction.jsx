@@ -20,6 +20,8 @@
  *   D-2: opening the page asks the backend to wake the sleeping ML service (fire-and-forget, api/mlWarmUp.js).
  *   R4-03: example scenarios fill the form (ScenarioPresets). R4-04: the result shows how the payment was scored
  *   (ScoringPipeline: rule engine → ML model → decision).
+ *   TEJAS D1: optional payee UPI ID (same rules as the API, utils/payee.js); without it the merchant is the payee.
+ *   The result names the payee and, when relevant, warns about a watchlisted payee (PayeeNotice).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -40,6 +42,8 @@ import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import ScoringPipeline from '../../components/common/ScoringPipeline.jsx';
 import ScenarioPresets from '../../components/common/ScenarioPresets.jsx';
 import WasThisYou from '../../components/common/WasThisYou.jsx';
+import PayeeNotice from '../../components/common/PayeeNotice.jsx';
+import { VPA_MAX_LENGTH, VPA_MESSAGE, isValidVpa, payeeLabel } from '../../utils/payee.js';
 import { RiskBadge, TxStatusBadge } from '../../components/common/Badges.jsx';
 
 // Suggestions only — any category may be typed (N-18)
@@ -70,12 +74,14 @@ function TransactionResult({ result, onAnother }) {
       <PageHeader title="Transaction result" subtitle={ACTION_TEXT[result.recommendedAction] ?? ''} />
       <section className={`${CARD.base} ${CARD.body} space-y-6`} aria-label="Fraud analysis result">
         {result.replayed && <Alert tone="info">{REPLAY_NOTE}</Alert>}
+        <PayeeNotice result={result} />
         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <DetailRow label="Transaction ID">{result.publicId}</DetailRow>
           <DetailRow label="Amount">{formatCurrency(result.amount)}</DetailRow>
           <DetailRow label="Status"><TxStatusBadge status={result.status} /></DetailRow>
           <DetailRow label="Risk"><RiskBadge level={result.riskLevel} /></DetailRow>
           <DetailRow label="Merchant">{result.merchantName}</DetailRow>
+          <DetailRow label="Paid to">{payeeLabel(result)}</DetailRow>
           <DetailRow label="Recommended action">{result.recommendedAction}</DetailRow>
           <DetailRow label="Estimated loss at risk">{formatCurrency(result.estimatedLoss)}</DetailRow>
           <DetailRow label="Time">{formatDate(result.timestamp)}</DetailRow>
@@ -119,7 +125,7 @@ export default function SubmitTransaction() {
     register, handleSubmit, reset, getValues, formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
-      amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI',
+      amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI', payeeVpa: '',
       deviceId, city: '', country: '',
     },
   });
@@ -131,6 +137,7 @@ export default function SubmitTransaction() {
       merchantName: values.merchantName,
       merchantCategory: values.merchantCategory,
       paymentMethod: values.paymentMethod,
+      payeeVpa: values.payeeVpa?.trim(), // TEJAS D1: optional; blank is stripped
       deviceId: values.deviceId,
       location: { city: values.city, country: values.country },
     });
@@ -147,7 +154,7 @@ export default function SubmitTransaction() {
 
   const another = () => {
     setResult(null);
-    reset({ amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI', deviceId, city: '', country: '' });
+    reset({ amount: '', merchantName: '', merchantCategory: '', paymentMethod: 'UPI', payeeVpa: '', deviceId, city: '', country: '' });
   };
 
   // R4-03: fill the form with an example; the customer still submits it themselves
@@ -212,6 +219,26 @@ export default function SubmitTransaction() {
                   required: 'Merchant name is required',
                   maxLength: { value: 200, message: 'Merchant name cannot exceed 200 characters' },
                   validate: (v) => v.trim().length > 0 || 'Merchant name is required',
+                })}
+              />
+            )}
+          />
+          <FormField
+            name="payeeVpa"
+            label="Payee UPI ID (optional)"
+            errors={errors}
+            hint="Who receives the money, e.g. ravi@okaxis. Leave empty when paying a shop by card or net banking."
+            render={(p) => (
+              <input
+                {...p}
+                type="text"
+                autoComplete="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="name@bank"
+                {...register('payeeVpa', {
+                  maxLength: { value: VPA_MAX_LENGTH, message: VPA_MESSAGE },
+                  validate: (v) => !v?.trim() || isValidVpa(v) || VPA_MESSAGE,
                 })}
               />
             )}

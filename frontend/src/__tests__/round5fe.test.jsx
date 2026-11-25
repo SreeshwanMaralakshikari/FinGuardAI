@@ -216,7 +216,7 @@ describe('F-11 CSV export, SLA and queue', () => {
     const text = await readBlob(created[0]);
     expect(text).toContain("'=cmd|x");
     expect(text).toContain('"Shop, ""Big"""');
-    expect(text.split('\r\n')[0].replace('﻿', '')).toBe('Transaction,Customer,Merchant,Amount (INR),Score,Risk,Status,Date (IST)');
+    expect(text.split('\r\n')[0].replace('﻿', '')).toBe('Transaction,Customer,Merchant,Payee,Amount (INR),Score,Risk,Status,Date (IST)'); // TEJAS D1: Payee column
   });
 
   it('Export CSV is disabled with no rows', async () => {

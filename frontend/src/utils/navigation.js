@@ -20,6 +20,8 @@ export const ANALYST_NAV = [
   { to: '/analyst/cases',                label: 'Cases',                icon: 'briefcase' },
   { to: '/analyst/fraud-patterns',       label: 'Fraud Patterns',       icon: 'network' },
   { to: '/analyst/device-reputation',    label: 'Device Reputation',    icon: 'device' },
+  { to: '/analyst/payees',               label: 'Payees',               icon: 'users' },  // TEJAS D1
+  { to: '/analyst/payee-watchlist',      label: 'Payee Watchlist',      icon: 'shield' }, // TEJAS D1
   { to: '/analyst/account',              label: 'Account',              icon: 'user' },
 ];
 

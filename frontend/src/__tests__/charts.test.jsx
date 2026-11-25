@@ -1,5 +1,5 @@
 // Charts on recharts 3: per-bar colours drawn through `shape` (Cell is deprecated) and a fixed legend order.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import BarCard from '../components/charts/BarCard.jsx';
 import TrendChart, { FORECAST_NAME } from '../components/charts/TrendChart.jsx';
@@ -7,6 +7,18 @@ import TrendChart, { FORECAST_NAME } from '../components/charts/TrendChart.jsx';
 const RISK = { LOW: 'LOW', MEDIUM: 'MEDIUM', HIGH: 'HIGH', CRITICAL: 'CRITICAL' };
 // the colours useChartColors falls back to when CSS variables cannot be read (jsdom)
 const HEX = { LOW: '#059669', MEDIUM: '#ca8a04', HIGH: '#ea580c', CRITICAL: '#dc2626', brand: '#0d7a6f' };
+
+// Recharts animates bars in with requestAnimationFrame unless the user prefers reduced motion (its default
+// isAnimationActive: 'auto'). jsdom has no matchMedia, so the animation ran and the bars only appeared after its
+// frames: on a busy laptop that took over the 5 s wait and the BarCard tests failed now and then (23 Nov). Reporting
+// "reduce" draws the final bars at once, which is exactly what a reduced-motion user sees in a real browser.
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', (query) => ({
+    matches: query.includes('prefers-reduced-motion'), media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  }));
+});
+afterEach(() => { vi.unstubAllGlobals(); });
 
 const barFills = (container) => [...container.querySelectorAll('.recharts-bar-rectangle path')].map((p) => p.getAttribute('fill'));
 

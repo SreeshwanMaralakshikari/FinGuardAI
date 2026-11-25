@@ -37,6 +37,8 @@ const CaseManagement      = lazy(() => import('./pages/analyst/CaseManagement.js
 const CaseDetail          = lazy(() => import('./pages/analyst/CaseDetail.jsx'));
 const DeviceReputation    = lazy(() => import('./pages/analyst/DeviceReputation.jsx'));
 const FraudPatterns       = lazy(() => import('./pages/analyst/FraudPatterns.jsx'));
+const PayeeProfile        = lazy(() => import('./pages/analyst/PayeeProfile.jsx'));   // TEJAS D1
+const PayeeWatchlist      = lazy(() => import('./pages/analyst/PayeeWatchlist.jsx')); // TEJAS D1
 
 const AdminDashboard      = lazy(() => import('./pages/admin/AdminDashboard.jsx'));
 const AdminTrends         = lazy(() => import('./pages/admin/AdminTrends.jsx'));
@@ -127,6 +129,8 @@ export default function App() {
                 <Route path="/analyst/cases/:id"            element={<CaseDetail />} />
                 <Route path="/analyst/fraud-patterns"       element={<FraudPatterns />} />
                 <Route path="/analyst/device-reputation"    element={<DeviceReputation />} />
+                <Route path="/analyst/payees"               element={<PayeeProfile />} />
+                <Route path="/analyst/payee-watchlist"      element={<PayeeWatchlist />} />
                 <Route path="/analyst/account"              element={<Account />} />
               </Route>
             </Route>

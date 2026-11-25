@@ -86,6 +86,8 @@ export const API_PATHS = Object.freeze({
     ADD_CASE_NOTE:        '/analyst-api/cases',           // append /:id/notes
     DEVICE_REPUTATION:    '/analyst-api/devices',
     FRAUD_PATTERNS:       '/analyst-api/fraud-patterns',
+    PAYEE_WATCHLIST:      '/analyst-api/payees/watchlist',  // TEJAS D1: GET ?status, POST, DELETE /:id
+    PAYEE_PROFILE:        '/analyst-api/payees/profile',    // TEJAS D1: GET ?key=
   }),
 
   ADMIN: Object.freeze({

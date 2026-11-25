@@ -37,12 +37,15 @@ import ScoreBar from '../../components/common/ScoreBar.jsx';
 import FraudExplanation from '../../components/common/FraudExplanation.jsx';
 import { RiskBadge, TxStatusBadge, CaseStatusBadge, AlertStatusBadge } from '../../components/common/Badges.jsx';
 import CustomerResponseNote from '../../components/common/CustomerResponseNote.jsx';
+import PayeePanel from '../../components/common/PayeePanel.jsx';
+import { payeeLabel } from '../../utils/payee.js';
 
 // F-11: "Export CSV" writes the rows of the page that is loaded right now.
 const CSV_COLUMNS = [
   { header: 'Transaction', value: (tx) => tx.publicId },
   { header: 'Customer', value: (tx) => tx.userId?.name },
   { header: 'Merchant', value: (tx) => tx.merchantName },
+  { header: 'Payee', value: (tx) => payeeLabel(tx) }, // TEJAS D1
   { header: 'Amount (INR)', value: (tx) => tx.amount },
   { header: 'Score', value: (tx) => tx.fraudScore },
   { header: 'Risk', value: (tx) => tx.riskLevel },
@@ -106,6 +109,8 @@ function InvestigationDetail({ ctx, t, dev, note, onNote, creating, onOpenCase, 
       </div>
 
       <CustomerResponseNote response={t.customerResponse} />
+
+      <PayeePanel transaction={t} />
 
       <FraudExplanation scoring={t.scoring} breakdown={t.scoreBreakdown} fraudScore={t.fraudScore} />
 
